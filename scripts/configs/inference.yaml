@@ -1,0 +1,42 @@
+project:
+  run_name: smolvla_lora_live
+  output_root: data/inference_logs
+
+lerobot:
+  robot:
+    type: so101_follower
+    port: /dev/serial/by-id/CHANGE_ME_FOLLOWER
+    id: osy_so101_follower
+    calibration_dir: data/calibration/robots
+    use_degrees: true
+    # 급격한 명령은 이 값으로 clamp되고 console.log에 WARNING으로 남는다.
+    max_relative_target: 5.0
+    cameras:
+      wrist:
+        type: opencv
+        index_or_path: /dev/video0
+        width: 640
+        height: 480
+        fps: 30
+        fourcc: MJPG
+  policy:
+    path: data/training_outputs/latest/training/checkpoints/last/pretrained_model
+    device: cuda
+    use_amp: true
+  strategy:
+    type: base
+  inference:
+    type: sync
+  device: cuda
+  task: Pick up the object and place it in the target container.
+  fps: 30
+  duration: 30
+  # action 사이를 보간해 follower target을 더 부드럽게 보낸다.
+  interpolation_multiplier: 2
+  display_data: false
+  play_sounds: false
+  return_to_initial_position: true
+
+metrics:
+  warmup_inferences: 3
+  cuda_synchronize: true

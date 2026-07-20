@@ -1,0 +1,69 @@
+# Machine-local dependencies (hundreds of MB/GB)
+/libraries/lerobot/
+/libraries/venv/
+
+# Runtime data: keep only documentation/placeholders in Git
+/data/models/*
+!/data/models/.gitkeep
+/data/training_outputs/*
+!/data/training_outputs/.gitkeep
+/data/inference_logs/*
+!/data/inference_logs/.gitkeep
+/data/collected_datasets/*
+!/data/collected_datasets/.gitkeep
+/data/downloaded_datasets/*
+!/data/downloaded_datasets/.gitkeep
+/data/calibration/*
+!/data/calibration/.gitkeep
+/data/calibration_runs/*
+!/data/calibration_runs/.gitkeep
+/data/rosbags/*
+!/data/rosbags/.gitkeep
+/outputs/
+
+# ROS 2 / colcon
+/build/
+/install/
+/log/
+**/build/
+**/install/
+**/log/
+*.db3
+*.mcap
+*.sqlite3
+
+# Profilers, checkpoints, and common model blobs
+*.nsys-rep
+*.ncu-rep
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.coverage
+htmlcov/
+
+# Local hardware/config overrides and secrets
+.env
+*.local.yaml
+.huggingface/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Compatibility with the repository's previous layout
+/lerobot-official/
+/venv-lerobot-jp72/
+/.venv/
+/venv/

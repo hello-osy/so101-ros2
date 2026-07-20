@@ -1,0 +1,21 @@
+project:
+  run_name: so101_calibration
+  output_root: data/calibration_runs
+  # follower, leader, both 중 선택
+  target: both
+
+devices:
+  follower:
+    type: so101_follower
+    port: /dev/serial/by-id/CHANGE_ME_FOLLOWER
+    id: osy_so101_follower
+    calibration_dir: data/calibration/robots
+    use_degrees: true
+    max_relative_target: 5.0
+    cameras: {}
+  leader:
+    type: so101_leader
+    port: /dev/serial/by-id/CHANGE_ME_LEADER
+    id: osy_so101_leader
+    calibration_dir: data/calibration/teleoperators
+    use_degrees: true

@@ -1,0 +1,45 @@
+# SO-101 leader를 손으로 움직여 LeRobotDataset v3 demo를 수집한다.
+project:
+  run_name: pick_place
+  output_root: data/collected_datasets
+  dataset_format: lerobot_v3
+
+lerobot:
+  robot:
+    type: so101_follower
+    port: /dev/serial/by-id/CHANGE_ME_FOLLOWER
+    id: osy_so101_follower
+    calibration_dir: data/calibration/robots
+    use_degrees: true
+    # 한 control tick에 허용할 최대 관절 변화량(degree). clamp 시 warning이 로그에 저장된다.
+    max_relative_target: 5.0
+    cameras:
+      wrist:
+        type: opencv
+        index_or_path: /dev/video0
+        width: 640
+        height: 480
+        fps: 30
+        fourcc: MJPG
+  teleop:
+    type: so101_leader
+    port: /dev/serial/by-id/CHANGE_ME_LEADER
+    id: osy_so101_leader
+    calibration_dir: data/calibration/teleoperators
+    use_degrees: true
+  dataset:
+    repo_id: local/so101_pick_place
+    root: AUTO                 # launcher가 run별 절대경로로 교체한다.
+    single_task: Pick up the object and place it in the target container.
+    fps: 30
+    episode_time_s: 300       # 오른쪽 화살표로 더 일찍 끝낸다.
+    reset_time_s: 300         # reset 후 오른쪽 화살표로 다음 episode를 시작한다.
+    num_episodes: 50
+    video: true
+    push_to_hub: false
+    streaming_encoding: true
+    encoder_threads: 2
+    encoder_queue_maxsize: 60
+  display_data: false
+  play_sounds: false
+  resume: false

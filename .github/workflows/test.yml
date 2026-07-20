@@ -1,0 +1,26 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies and ROS-independent bridge package
+        run: |
+          python -m pip install pyyaml
+          python -m pip install --no-deps --editable libraries/ros2_bridge
+      - name: Run ROS-independent safety tests
+        run: |
+          python -m unittest discover --start-directory scripts/tests_for_codex --verbose
+          python -m unittest discover --start-directory libraries/ros2_bridge/test --verbose
+      - name: Compile Python sources
+        run: python -m compileall -q scripts libraries/ros2_bridge/so101_ros2 libraries/ros2_bridge/launch
+      - name: Check launch shell syntax
+        run: bash -n launchfiles/*.bash scripts/*.bash libraries/ros2_bridge/scripts/*.bash
