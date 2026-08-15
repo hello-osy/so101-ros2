@@ -37,6 +37,10 @@ def desktop(config: dict) -> tuple[str, int, PurePosixPath]:
 
 
 def rsync(source: str, destination: str, port: int, *, check: bool, quiet: bool = False) -> int:
+    ssh_command = (
+        f"ssh -p {port} -o BatchMode=yes -o ConnectTimeout=5 "
+        "-o ServerAliveInterval=5 -o ServerAliveCountMax=1"
+    )
     command = [
         "rsync",
         "--archive",
@@ -45,7 +49,7 @@ def rsync(source: str, destination: str, port: int, *, check: bool, quiet: bool 
         "--human-readable",
         "--exclude=*.tmp",
         "-e",
-        f"ssh -p {port}",
+        ssh_command,
         source,
         destination,
     ]
