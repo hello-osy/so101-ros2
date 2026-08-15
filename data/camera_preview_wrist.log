@@ -1,0 +1,10 @@
+[swscaler @ 0xffff541e0470] deprecated pixel format used, make sure you did set range correctly
+[swscaler @ 0xffff541e0470] No accelerated colorspace conversion found from yuv422p to rgba.
+[swscaler @ 0xffff541e0470] [swscaler @ 0xffff541f4280] No accelerated colorspace conversion found from yuv422p to rgba.
+[swscaler @ 0xffff541e0470] [swscaler @ 0xffff54207d30] No accelerated colorspace conversion found from yuv422p to rgba.
+[swscaler @ 0xffff541e0470] [swscaler @ 0xffff5421b7e0] No accelerated colorspace conversion found from yuv422p to rgba.
+[swscaler @ 0xffff541e0470] [swscaler @ 0xffff5422f290] No accelerated colorspace conversion found from yuv422p to rgba.
+[swscaler @ 0xffff541e0470] [swscaler @ 0xffff54242d40] No accelerated colorspace conversion found from yuv422p to rgba.
+[swscaler @ 0xffff541e0470] [swscaler @ 0xffff542567f0] No accelerated colorspace conversion found from yuv422p to rgba.
+[swscaler @ 0xffff541e0470] [swscaler @ 0xffff5426a2a0] No accelerated colorspace conversion found from yuv422p to rgba.
+[mjpeg @ 0xffff5c001920] EOI missing, emulating

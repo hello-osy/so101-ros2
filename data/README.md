@@ -7,6 +7,7 @@
 - `models`: Hugging Face 모델 cache/weight
 - `training_outputs`: checkpoint와 학습 로그
 - `inference_logs`: 실시간 latency, benchmark, Nsight report
+- `teleoperation_logs`: leader/follower 직접 조종 log
 - `calibration`: follower/leader calibration JSON
 - `calibration_runs`: calibration 당시 YAML과 console log
 - `rosbags`: 이전 ROS2 bridge용 bag

@@ -1,0 +1,13 @@
+diff --git a/src/lerobot/policies/smolvla/modeling_smolvla.py b/src/lerobot/policies/smolvla/modeling_smolvla.py
+index 6d246bf..51ef5c0 100644
+--- a/src/lerobot/policies/smolvla/modeling_smolvla.py
++++ b/src/lerobot/policies/smolvla/modeling_smolvla.py
+@@ -506,7 +506,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
+     def _validate_peft_config(self, peft_config) -> None:
+         """Validate PEFT configuration for SmolVLA."""
+         super()._validate_peft_config(peft_config)
+-        if not self.config.load_vlm_weights:
++        if not self.config.load_vlm_weights and self.config.pretrained_path is None:
+             import logging
+ 
+             logging.warning(

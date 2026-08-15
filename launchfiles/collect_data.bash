@@ -2,4 +2,4 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 exec "$ROOT/libraries/venv/bin/python" "$ROOT/scripts/data_collection/run_collection.py" \
-  --config "$ROOT/scripts/configs/data_collection.yaml" "$@"
+  "$@"

@@ -3,12 +3,28 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ $# -ne 1 ]]; then
+  echo "사용법: ./scripts/bootstrap_environment.bash config/system.yaml" >&2
+  exit 2
+fi
+CONFIG_PATH="$1"
+mapfile -t SYSTEM_VERSIONS < <(python3 - "$CONFIG_PATH" <<'PY'
+from pathlib import Path
+import sys
+import yaml
+
+system = yaml.safe_load(Path(sys.argv[1]).read_text(encoding="utf-8"))["system"]
+print(system["lerobot_revision"])
+print(system["torch"])
+print(system["torchvision"])
+PY
+)
 mkdir -p "$PROJECT_ROOT/libraries"
 VENV_DIR="$PROJECT_ROOT/libraries/venv"
 LEROBOT_DIR="$PROJECT_ROOT/libraries/lerobot"
-LEROBOT_REV="${LEROBOT_REV:-e40b58a8dfa9e7b86918c374791599d070518d11}"
-EXPECTED_TORCH="${EXPECTED_TORCH:-2.13.0+cu132}"
-EXPECTED_TORCHVISION="${EXPECTED_TORCHVISION:-0.28.0+cu132}"
+LEROBOT_REV="${SYSTEM_VERSIONS[0]}"
+EXPECTED_TORCH="${SYSTEM_VERSIONS[1]}"
+EXPECTED_TORCHVISION="${SYSTEM_VERSIONS[2]}"
 
 if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   echo "Creating $VENV_DIR with access to Jetson system packages..."
@@ -101,6 +117,11 @@ print("CUDA build:", torch.version.cuda)
 print("CUDA available:", torch.cuda.is_available())
 if torch.cuda.is_available():
     print("GPU:", torch.cuda.get_device_name(0))
+elif __import__("os").environ.get("REQUIRE_CUDA", "1") == "1":
+    raise SystemExit(
+        "CUDA is not available to PyTorch. Check the JetPack/PyTorch wheel pairing. "
+        "Set REQUIRE_CUDA=0 only for a non-Jetson static-check environment."
+    )
 PY
 
-echo "LeRobot environment bootstrap complete."
+echo "LeRobot environment bootstrap complete. Next: ./launchfiles/download_models.bash $CONFIG_PATH"

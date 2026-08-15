@@ -1,6 +1,7 @@
 # Machine-local dependencies (hundreds of MB/GB)
 /libraries/lerobot/
 /libraries/venv/
+/libraries/venv-desktop/
 
 # Runtime data: keep only documentation/placeholders in Git
 /data/models/*
@@ -9,6 +10,10 @@
 !/data/training_outputs/.gitkeep
 /data/inference_logs/*
 !/data/inference_logs/.gitkeep
+/data/profiling_from_orin/*
+!/data/profiling_from_orin/.gitkeep
+/data/teleoperation_logs/*
+!/data/teleoperation_logs/.gitkeep
 /data/collected_datasets/*
 !/data/collected_datasets/.gitkeep
 /data/downloaded_datasets/*

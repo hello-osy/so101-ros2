@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 import statistics
 import time
 from datetime import datetime
@@ -22,10 +24,32 @@ def percentile(values: list[float], percent: float) -> float:
     return ordered[low] * (1 - fraction) + ordered[high] * fraction
 
 
+def current_rss_bytes() -> int | None:
+    try:
+        pages = int(Path("/proc/self/statm").read_text(encoding="utf-8").split()[1])
+        return pages * os.sysconf("SC_PAGE_SIZE")
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def memory_available_bytes() -> int | None:
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--metrics-output", required=True)
+    parser.add_argument("--torch-profile-output")
+    parser.add_argument("--torch-profile-table")
+    parser.add_argument("--torch-profile-iterations", type=int, default=5)
+    parser.add_argument("--cuda-profiler-api", action="store_true")
     args = parser.parse_args()
 
     config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
@@ -79,37 +103,90 @@ def main() -> int:
         postprocessor.reset()
         if device.startswith("cuda") and synchronize:
             torch.cuda.synchronize()
+            torch.cuda.reset_peak_memory_stats()
         if device.startswith("cuda"):
             torch.cuda.nvtx.range_push("so101_offline_policy_forward")
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-            start_event.record()
+            events = [torch.cuda.Event(enable_timing=True) for _ in range(4)]
+            events[0].record()
         started = time.perf_counter_ns()
-        with torch.inference_mode():
+        autocast = (
+            torch.autocast(device_type="cuda")
+            if device.startswith("cuda") and bool(cfg["policy"].get("use_amp", False))
+            else contextlib.nullcontext()
+        )
+        with torch.inference_mode(), autocast:
             processed = preprocessor(batch)
+            if device.startswith("cuda"):
+                events[1].record()
             action = policy.select_action(processed)
+            if device.startswith("cuda"):
+                events[2].record()
             postprocessor(action)
         if device.startswith("cuda"):
-            end_event.record()
+            events[3].record()
         if device.startswith("cuda") and synchronize:
             torch.cuda.synchronize()
         end_to_end_ms = (time.perf_counter_ns() - started) / 1_000_000
-        cuda_ms = start_event.elapsed_time(end_event) if device.startswith("cuda") and synchronize else None
+        cuda_stages = None
+        if device.startswith("cuda") and synchronize:
+            cuda_stages = {
+                "preprocess_ms": events[0].elapsed_time(events[1]),
+                "policy_ms": events[1].elapsed_time(events[2]),
+                "postprocess_ms": events[2].elapsed_time(events[3]),
+                "total_ms": events[0].elapsed_time(events[3]),
+            }
         if device.startswith("cuda"):
             torch.cuda.nvtx.range_pop()
+        cuda_memory = None
+        if device.startswith("cuda"):
+            cuda_memory = {
+                "allocated_bytes": torch.cuda.memory_allocated(),
+                "reserved_bytes": torch.cuda.memory_reserved(),
+                "peak_allocated_bytes": torch.cuda.max_memory_allocated(),
+                "peak_reserved_bytes": torch.cuda.max_memory_reserved(),
+            }
         records.append(
             {
                 "index": index,
                 "warmup": is_warmup,
                 "end_to_end_ms": end_to_end_ms,
-                "cuda_ms": cuda_ms,
+                "cuda_ms": cuda_stages["total_ms"] if cuda_stages else None,
+                "cuda_stages": cuda_stages,
+                "cuda_memory": cuda_memory,
+                "process_rss_bytes": current_rss_bytes(),
+                "system_memory_available_bytes": memory_available_bytes(),
             }
         )
 
     for index in range(warmup):
         one(index, True)
-    for index in range(iterations):
-        one(index, False)
+    if args.cuda_profiler_api:
+        torch.cuda.cudart().cudaProfilerStart()
+    try:
+        if args.torch_profile_output:
+            profile_iterations = min(iterations, max(1, args.torch_profile_iterations))
+            activities = [torch.profiler.ProfilerActivity.CPU]
+            if device.startswith("cuda"):
+                activities.append(torch.profiler.ProfilerActivity.CUDA)
+            with torch.profiler.profile(
+                activities=activities,
+                record_shapes=True,
+                profile_memory=True,
+            ) as profiler:
+                for index in range(profile_iterations):
+                    one(index, False)
+                    profiler.step()
+            profiler.export_chrome_trace(args.torch_profile_output)
+            sort_by = "self_cuda_time_total" if device.startswith("cuda") else "self_cpu_time_total"
+            table = profiler.key_averages().table(sort_by=sort_by, row_limit=100)
+            if args.torch_profile_table:
+                Path(args.torch_profile_table).write_text(table + "\n", encoding="utf-8")
+        else:
+            for index in range(iterations):
+                one(index, False)
+    finally:
+        if args.cuda_profiler_api:
+            torch.cuda.cudart().cudaProfilerStop()
 
     measured = [row["end_to_end_ms"] for row in records if not row["warmup"]]
     cuda_values = [row["cuda_ms"] for row in records if not row["warmup"] and row["cuda_ms"]]
@@ -121,6 +198,7 @@ def main() -> int:
         "policy_path": policy_path,
         "device": device,
         "iterations": iterations,
+        "measured_iterations": len(measured),
         "warmup_inferences": warmup,
         "summary": {
             "mean_ms": statistics.fmean(measured),
@@ -131,6 +209,18 @@ def main() -> int:
             "max_ms": max(measured),
             "mean_hz": 1000 / statistics.fmean(measured),
             "mean_cuda_ms": statistics.fmean(cuda_values) if cuda_values else None,
+            "peak_cuda_allocated_bytes": max(
+                (row["cuda_memory"]["peak_allocated_bytes"] for row in records if row["cuda_memory"]),
+                default=None,
+            ),
+            "peak_cuda_reserved_bytes": max(
+                (row["cuda_memory"]["peak_reserved_bytes"] for row in records if row["cuda_memory"]),
+                default=None,
+            ),
+            "peak_process_rss_bytes": max(
+                (row["process_rss_bytes"] for row in records if row["process_rss_bytes"] is not None),
+                default=None,
+            ),
         },
         "samples": records,
     }

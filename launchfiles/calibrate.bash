@@ -2,4 +2,4 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 exec "$ROOT/libraries/venv/bin/python" "$ROOT/scripts/calibration/run_calibration.py" \
-  --config "$ROOT/scripts/configs/calibration.yaml" "$@"
+  "$@"

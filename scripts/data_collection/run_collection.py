@@ -13,58 +13,39 @@ from project_utils import (  # noqa: E402
     absolute_path,
     command_path,
     create_run,
-    load_yaml,
     print_check,
     project_environment,
     reject_placeholders,
-    require_keys,
     run_logged,
     snapshot_configs,
     update_latest,
 )
-
-
-def build_native(config: dict, dataset_root: str) -> dict:
-    project = config.get("project", {})
-    native = dict(config.get("lerobot", {}))
-    require_keys(project, "dataset_format", "output_root", context="project")
-    require_keys(native, "robot", "teleop", "dataset", context="lerobot")
-    if project["dataset_format"] != "lerobot_v3":
-        raise ValueError("현재 수집기는 dataset_format: lerobot_v3만 지원합니다.")
-
-    native["robot"] = dict(native["robot"])
-    native["teleop"] = dict(native["teleop"])
-    for device in (native["robot"], native["teleop"]):
-        if device.get("calibration_dir"):
-            device["calibration_dir"] = absolute_path(device["calibration_dir"])
-    native["dataset"] = dict(native["dataset"])
-    native["dataset"]["root"] = dataset_root
-    # LeRobot 0.6.1 records v3 and calls finalize() even on Ctrl+C.
-    native["dataset"]["push_to_hub"] = bool(native["dataset"].get("push_to_hub", False))
-    return native
+from system_config import collection_config, load_system, run_settings  # noqa: E402
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True)
+    parser.add_argument("config", help="통합 system YAML")
     parser.add_argument("--check", action="store_true", help="hardware 없이 config만 검사")
     args = parser.parse_args()
 
     config_path = Path(args.config).resolve()
-    config = load_yaml(config_path)
-    project = config.get("project", {})
-    provisional_root = absolute_path(Path(project.get("output_root", "data/collected_datasets")) / "CHECK_RUN" / "dataset")
-    native = build_native(config, provisional_root)
+    config = load_system(config_path)
+    dataset = config["dataset"]
+    settings = run_settings(config, "collection")
+    output_root = dataset.get("storage_root", "data/collected_datasets")
+    provisional_root = absolute_path(Path(output_root) / "CHECK_RUN" / "dataset")
+    native = collection_config(config, provisional_root)
     check_command = [command_path("lerobot-record"), "--config_path=RESOLVED_CONFIG"]
     if args.check:
         print_check("collection", native, check_command)
         return 0
 
     reject_placeholders(native)
-    run_name = str(project.get("run_name", "pick_place"))
-    run_dir, artifacts = create_run(project["output_root"], run_name)
+    run_name = str(settings.get("run_name", "pick_place"))
+    run_dir, artifacts = create_run(output_root, run_name)
     dataset_root = run_dir / "dataset"
-    native = build_native(config, str(dataset_root))
+    native = collection_config(config, str(dataset_root))
     resolved = snapshot_configs(config_path, native, artifacts)
 
     print("\n[데이터 수집 키]")
@@ -80,7 +61,7 @@ def main() -> int:
         project_environment(),
     )
     if code == 0 and (dataset_root / "meta" / "info.json").exists():
-        update_latest(project["output_root"], run_dir)
+        update_latest(output_root, run_dir)
         print(f"dataset: {dataset_root}")
     elif code == 0:
         print("오류: 명령은 끝났지만 LeRobotDataset meta/info.json이 없습니다.", file=sys.stderr)

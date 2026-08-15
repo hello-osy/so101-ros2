@@ -4,4 +4,4 @@
 - `venv/`: Jetson Python virtual environment (Git에서 제외)
 - `ros2_bridge/`: 예전 joint/image rosbag record/replay 패키지 (소스만 Git에 포함)
 
-`lerobot/`과 `venv/`는 `./scripts/bootstrap_environment.bash`로 재현한다.
+`lerobot/`과 `venv/`는 `./scripts/bootstrap_environment.bash config/system.yaml`로 재현한다.

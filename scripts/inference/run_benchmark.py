@@ -4,47 +4,30 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from project_utils import (  # noqa: E402
-    absolute_path,
     command_path,
     create_run,
-    load_yaml,
-    local_path_or_hub_id,
     print_check,
     project_environment,
     reject_placeholders,
-    require_keys,
     run_logged,
     update_latest,
     write_yaml,
 )
-
-
-def resolve_config(config: dict) -> dict:
-    resolved = dict(config)
-    benchmark = dict(resolved.get("benchmark", {}))
-    require_keys(benchmark, "dataset", "policy", "device", context="benchmark")
-    dataset = dict(benchmark["dataset"])
-    policy = dict(benchmark["policy"])
-    require_keys(dataset, "repo_id", "root", context="benchmark.dataset")
-    require_keys(policy, "path", context="benchmark.policy")
-    dataset["root"] = absolute_path(dataset["root"])
-    policy["path"] = local_path_or_hub_id(str(policy["path"]))
-    benchmark["dataset"] = dataset
-    benchmark["policy"] = policy
-    resolved["benchmark"] = benchmark
-    return resolved
+from system_config import benchmark_config, load_system  # noqa: E402
 
 
 def profiler_prefix(profiler: str, config: dict, run_dir: Path) -> list[str]:
     profile_cfg = config.get("profiling", {})
-    if profiler == "none":
+    if profiler in {"none", "torch"}:
         return []
     if profiler == "nsys":
         nsys = profile_cfg.get("nsys", {})
@@ -53,6 +36,8 @@ def profiler_prefix(profiler: str, config: dict, run_dir: Path) -> list[str]:
             "profile",
             f"--trace={nsys.get('trace', 'cuda,nvtx,osrt')}",
             f"--sample={nsys.get('sample', 'none')}",
+            "--capture-range=cudaProfilerApi",
+            "--capture-range-end=stop",
             "--force-overwrite=true",
             f"--output={run_dir / 'nsys_profile'}",
         ]
@@ -62,6 +47,8 @@ def profiler_prefix(profiler: str, config: dict, run_dir: Path) -> list[str]:
             command_path("ncu"),
             "--target-processes",
             str(ncu.get("target_processes", "all")),
+            "--profile-from-start",
+            "off",
             "--set",
             str(ncu.get("set", "basic")),
             "--launch-count",
@@ -73,15 +60,57 @@ def profiler_prefix(profiler: str, config: dict, run_dir: Path) -> list[str]:
     raise ValueError(f"지원하지 않는 profiler: {profiler}")
 
 
+@contextlib.contextmanager
+def jetson_telemetry(config: dict, artifacts: Path):
+    """Capture unified-memory, clocks, temperature, and power alongside a run."""
+    telemetry = config.get("profiling", {}).get("tegrastats", {})
+    if not bool(telemetry.get("enable", True)):
+        yield
+        return
+    executable = shutil.which("tegrastats")
+    if not executable:
+        (artifacts / "tegrastats_unavailable.txt").write_text(
+            "tegrastats was not found; GPU timing is still available in benchmark_metrics.json.\n",
+            encoding="utf-8",
+        )
+        yield
+        return
+
+    log_path = artifacts / "tegrastats.log"
+    error_stream = (artifacts / "tegrastats.stderr.log").open("w", encoding="utf-8")
+    process = subprocess.Popen(
+        [
+            executable,
+            "--interval",
+            str(int(telemetry.get("interval_ms", 250))),
+            "--logfile",
+            str(log_path),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=error_stream,
+        start_new_session=True,
+    )
+    try:
+        yield
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+        error_stream.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True)
-    parser.add_argument("--profiler", choices=("none", "nsys", "ncu"), default="none")
+    parser.add_argument("config", help="통합 system YAML")
+    parser.add_argument("--profiler", choices=("none", "torch", "nsys", "ncu"), default="none")
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
 
     config_path = Path(args.config).resolve()
-    resolved_config = resolve_config(load_yaml(config_path))
+    resolved_config = benchmark_config(load_system(config_path))
     child = Path(__file__).with_name("benchmark_child.py")
     command = profiler_prefix(args.profiler, resolved_config, Path("PROFILE_RUN")) + [
         command_path("python"),
@@ -91,6 +120,8 @@ def main() -> int:
         "--metrics-output",
         "METRICS_OUTPUT",
     ]
+    if args.profiler in {"nsys", "ncu"}:
+        command.append("--cuda-profiler-api")
     if args.check:
         print_check(f"benchmark:{args.profiler}", resolved_config, command)
         return 0
@@ -120,7 +151,22 @@ def main() -> int:
         "--metrics-output",
         str(artifacts / "benchmark_metrics.json"),
     ]
-    code = run_logged(child_command, run_dir, project_environment())
+    if args.profiler in {"nsys", "ncu"}:
+        child_command.append("--cuda-profiler-api")
+    if args.profiler == "torch":
+        torch_cfg = resolved_config.get("profiling", {}).get("torch", {})
+        child_command.extend(
+            [
+                "--torch-profile-output",
+                str(artifacts / "torch_trace.json"),
+                "--torch-profile-table",
+                str(artifacts / "torch_operators.txt"),
+                "--torch-profile-iterations",
+                str(int(torch_cfg.get("active_iterations", 5))),
+            ]
+        )
+    with jetson_telemetry(resolved_config, artifacts):
+        code = run_logged(child_command, run_dir, project_environment())
     if code == 0:
         update_latest(project.get("output_root", "data/inference_logs"), run_dir)
         print(f"benchmark output: {run_dir}")

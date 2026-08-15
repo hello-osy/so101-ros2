@@ -22,13 +22,13 @@ _so101_find_dir() {
 
 SO101_VENV_DIR="$(_so101_find_dir "${SO101_VENV_DIR:-}" \
   "$_so101_root/libraries/venv")" || {
-  echo "SO-101 error: libraries/venv was not found. Run ./scripts/bootstrap_environment.bash" >&2
+  echo "SO-101 error: libraries/venv was not found. Run ./scripts/bootstrap_environment.bash config/system.yaml" >&2
   return 1 2>/dev/null || exit 1
 }
 
 SO101_LEROBOT_DIR="$(_so101_find_dir "${SO101_LEROBOT_DIR:-}" \
   "$_so101_root/libraries/lerobot")" || {
-  echo "SO-101 error: libraries/lerobot was not found. Run ./scripts/bootstrap_environment.bash" >&2
+  echo "SO-101 error: libraries/lerobot was not found. Run ./scripts/bootstrap_environment.bash config/system.yaml" >&2
   return 1 2>/dev/null || exit 1
 }
 
@@ -41,6 +41,10 @@ export PYTHONPATH="$SO101_LEROBOT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 export HF_HOME="$_so101_root/data/models/huggingface"
 export HF_LEROBOT_HOME="$_so101_root/data/downloaded_datasets/lerobot"
 export HF_LEROBOT_CALIBRATION="$_so101_root/data/calibration"
+export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
+# Jetson has shared 8 GB memory; expandable CUDA segments reduce allocator fragmentation
+# during repeated VLA forwards and LoRA training.
+export PYTORCH_ALLOC_CONF="${PYTORCH_ALLOC_CONF:-expandable_segments:True}"
 
 # A moved venv has stale absolute paths in activate and console-script shebangs.
 # Calling its python symlink directly and adding LeRobot/src avoids those paths.

@@ -23,6 +23,12 @@ LEROBOT_ROOT = PROJECT_ROOT / "libraries" / "lerobot"
 VENV_ROOT = PROJECT_ROOT / "libraries" / "venv"
 
 
+def runtime_venv() -> Path:
+    """Use the desktop venv when a launcher selects it, otherwise use Jetson's."""
+    configured = os.environ.get("SO101_VENV_DIR")
+    return Path(configured).expanduser().resolve() if configured else VENV_ROOT
+
+
 def load_yaml(path: str | Path) -> dict[str, Any]:
     path = Path(path).expanduser().resolve()
     with path.open(encoding="utf-8") as stream:
@@ -131,24 +137,25 @@ def reject_placeholders(data: Any) -> None:
 
 
 def command_path(name: str) -> str:
-    candidate = VENV_ROOT / "bin" / name
+    candidate = runtime_venv() / "bin" / name
     if candidate.exists():
         return str(candidate)
     found = shutil.which(name)
     if found:
         return found
     raise FileNotFoundError(
-        f"{name}을 찾지 못했습니다. 먼저 ./scripts/bootstrap_environment.bash를 실행하세요."
+        f"{name}을 찾지 못했습니다. 먼저 ./scripts/bootstrap_environment.bash config/system.yaml을 실행하세요."
     )
 
 
 def project_environment() -> dict[str, str]:
     env = os.environ.copy()
+    venv_root = runtime_venv()
     env.update(
         {
             "SO101_PROJECT_ROOT": str(PROJECT_ROOT),
             "SO101_LEROBOT_DIR": str(LEROBOT_ROOT),
-            "SO101_VENV_DIR": str(VENV_ROOT),
+            "SO101_VENV_DIR": str(venv_root),
             "HF_HOME": str(PROJECT_ROOT / "data" / "models" / "huggingface"),
             "HF_LEROBOT_HOME": str(PROJECT_ROOT / "data" / "downloaded_datasets" / "lerobot"),
             "HF_LEROBOT_CALIBRATION": str(PROJECT_ROOT / "data" / "calibration"),
@@ -159,7 +166,7 @@ def project_environment() -> dict[str, str]:
     if env.get("PYTHONPATH"):
         python_path += os.pathsep + env["PYTHONPATH"]
     env["PYTHONPATH"] = python_path
-    env["PATH"] = str(VENV_ROOT / "bin") + os.pathsep + env.get("PATH", "")
+    env["PATH"] = str(venv_root / "bin") + os.pathsep + env.get("PATH", "")
     return env
 
 
@@ -189,9 +196,14 @@ def run_logged(args: list[str], run_dir: Path, env: dict[str, str] | None = None
         )
         try:
             assert process.stdout is not None
-            for line in process.stdout:
-                print(line, end="")
-                log.write(line)
+            # input() prompts often have no trailing newline. Reading a line at
+            # a time hides the prompt while the child is already waiting.
+            while True:
+                chunk = process.stdout.read(1)
+                if chunk == "":
+                    break
+                print(chunk, end="", flush=True)
+                log.write(chunk)
             code = process.wait()
         except KeyboardInterrupt:
             process.send_signal(2)
@@ -243,6 +255,11 @@ def system_metadata() -> dict[str, Any]:
         "cpu_count": os.cpu_count(),
         "memory_total_bytes": memory_total,
         "jetson_model": jetson_model,
+        "jetpack_l4t": _capture(
+            ["dpkg-query", "--showformat=${Version}", "--show", "nvidia-l4t-core"]
+        ),
+        "nvpmodel": _capture(["nvpmodel", "-q"]),
+        "jetson_clocks": _capture(["jetson_clocks", "--show"]),
         "project_git_commit": _capture(["git", "rev-parse", "HEAD"], PROJECT_ROOT),
         "project_git_status": _capture(["git", "status", "--short"], PROJECT_ROOT),
         "lerobot_git_commit": _capture(["git", "rev-parse", "HEAD"], LEROBOT_ROOT),

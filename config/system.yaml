@@ -1,0 +1,223 @@
+# SO-101 프로젝트의 유일한 사용자 설정 파일입니다.
+# 장치, 카메라, 데이터셋, 모델, 실행 옵션은 모두 여기에서만 수정합니다.
+
+system:
+  name: so101-pick-place
+  target: Jetson Orin Nano 8GB
+  os: Ubuntu 24.04 arm64
+  python: "3.12"
+  cuda: "13.2"
+  torch: 2.13.0+cu132
+  torchvision: 0.28.0+cu132
+  lerobot_revision: e40b58a8dfa9e7b86918c374791599d070518d11
+  desktop:
+    target: NVIDIA GeForce RTX 5070 Ti 16GB
+    os: Ubuntu 24.04 x86_64
+    python: "3.12"
+    cuda: "13.2"
+    torch: 2.12.1+cu132
+    torchvision: 0.27.1+cu132
+
+# Orin과 학습 데스크탑 사이의 SSH/rsync 연결입니다. host만 실제 유선 IPv4로 바꾸면 됩니다.
+# 데스크탑에서 `hostname -I`로 주소를 확인하고 SSH server를 켠 뒤 사용하세요.
+transfer:
+  desktop:
+    host: 192.168.50.1
+    user: osy
+    repo_path: /home/osy/so101-ros2
+    ssh_port: 22
+  sync_interval_s: 30
+  model_root: data/models/smolvla_finetuned
+  profiling_root: data/profiling_from_orin
+
+devices:
+  follower:
+    type: so101_follower
+    port: /dev/ttyACM1
+    id: osy_so101_follower
+    calibration_dir: data/calibration/robots
+    use_degrees: true
+    # 한 control tick에 허용할 최대 관절 변화량(degree)
+    max_relative_target: 5.0
+  leader:
+    type: so101_leader
+    port: /dev/ttyACM0
+    id: osy_so101_leader
+    calibration_dir: data/calibration/teleoperators
+    use_degrees: true
+  cameras:
+    wrist:
+      type: opencv
+      index_or_path: /dev/video0
+      width: 640
+      height: 480
+      fps: 30
+      fourcc: MJPG
+    front:
+      type: opencv
+      index_or_path: /dev/video2
+      width: 640
+      height: 480
+      fps: 30
+      fourcc: YUYV
+
+dataset:
+  format: lerobot_v3
+  repo_id: local/so101_pick_place
+  storage_root: data/collected_datasets
+  training_root: data/collected_datasets/latest/dataset
+  task: Pick up the blue bottle cap inside the yellow square and place it inside the green square.
+  fps: 30
+  episode_time_s: 300
+  reset_time_s: 300
+  num_episodes: 50
+  video: true
+  push_to_hub: false
+  streaming_encoding: true
+  encoder_threads: 2
+  encoder_queue_maxsize: 60
+
+model:
+  base:
+    repo_id: lerobot/smolvla_base
+    revision: 4d2f2b37fa245361ef1efe6d91ce96b8bd4af511
+    path: data/models/smolvla_base
+  vlm:
+    repo_id: HuggingFaceTB/SmolVLM2-500M-Video-Instruct
+    revision: a3992d502a8714ce2f6207fde3507ccf9503f224
+    path: data/models/smolvlm2-500m-metadata
+  trained_policy_path: data/models/smolvla_finetuned/latest
+  device: cuda
+  use_amp: true
+  load_vlm_weights: false
+  push_to_hub: false
+  peft:
+    method_type: LORA
+    r: 16
+    lora_alpha: 16
+
+runs:
+  camera_viewer:
+    cameras: [wrist, front]
+
+  calibration:
+    run_name: so101_calibration
+    output_root: data/calibration_runs
+    target: both                 # follower, leader, both
+    communication_retries: 3
+
+  teleoperation:
+    run_name: so101_teleoperation
+    output_root: data/teleoperation_logs
+    # 모터 제어는 60Hz, 카메라는 별도 30Hz 창으로 실행해 서로 지연시키지 않습니다.
+    fps: 60
+    teleop_time_s: null          # null이면 Ctrl+C까지 계속 실행
+    camera_preview: wrist        # null이면 카메라 창을 띄우지 않음
+    display_data: false          # true는 Rerun 관절 표시용이며 제어가 느려질 수 있음
+    display_mode: rerun
+
+  collection:
+    run_name: pick_place
+    display_data: false
+    play_sounds: false
+    resume: false
+
+  training:
+    run_name: smolvla_lora_pick_place
+    output_root: data/training_outputs
+    seed: 1000
+    batch_size: 1
+    num_workers: 0
+    prefetch_factor: 2
+    persistent_workers: false
+    steps: 10000
+    log_freq: 20
+    save_checkpoint: true
+    save_freq: 2000
+    env_eval_freq: 0
+    eval_steps: 0
+    use_policy_training_preset: true
+    wandb:
+      enable: false
+      mode: offline
+      project: so101-lora
+
+  # Ubuntu 24.04 + Python 3.12 + RTX 5070 Ti 16GB용 파인튜닝 프로필
+  training_desktop:
+    run_name: smolvla_lora_pick_place_5070ti
+    output_root: data/training_outputs
+    seed: 1000
+    batch_size: 8
+    num_workers: 8
+    prefetch_factor: 4
+    persistent_workers: true
+    cudnn_deterministic: false
+    steps: 20000
+    log_freq: 20
+    save_checkpoint: true
+    save_freq: 2000
+    env_eval_freq: 0
+    eval_steps: 500
+    max_eval_samples: 512
+    use_policy_training_preset: true
+    dataset:
+      eval_split: 0.1
+    policy:
+      freeze_vision_encoder: true
+      train_expert_only: true
+      train_state_proj: true
+      optimizer_lr: 0.001
+      scheduler_warmup_steps: 1000
+      scheduler_decay_steps: 20000
+      scheduler_decay_lr: 0.0001
+      compile_model: false
+    peft:
+      method_type: LORA
+      r: 64
+      lora_alpha: 64
+    wandb:
+      enable: false
+      mode: offline
+      project: so101-lora-5070ti
+
+  inference:
+    run_name: smolvla_lora_live
+    output_root: data/inference_logs
+    strategy:
+      type: base
+    inference:
+      type: sync
+    duration: 30
+    interpolation_multiplier: 2
+    use_torch_compile: false
+    torch_compile_backend: inductor
+    torch_compile_mode: default
+    compile_warmup_inferences: 2
+    display_data: false
+    play_sounds: false
+    return_to_initial_position: true
+    metrics:
+      warmup_inferences: 3
+      cuda_synchronize: true
+
+  benchmark:
+    run_name: smolvla_lora_offline_profile
+    output_root: data/inference_logs
+    sample_index: 0
+    warmup_inferences: 2
+    iterations: 20
+    cuda_synchronize: true
+
+  profiling:
+    tegrastats:
+      enable: true
+      interval_ms: 250
+    torch:
+      active_iterations: 5
+    nsys:
+      trace: cuda,nvtx,osrt
+      sample: none
+    ncu:
+      target_processes: all
+      set: basic
+      launch_count: 10
