@@ -99,6 +99,8 @@ def collection_config(config: dict, dataset_root: str) -> dict:
         raise ValueError("dataset.format은 lerobot_v3여야 합니다.")
     dataset.pop("storage_root", None)
     dataset.pop("training_root", None)
+    dataset.pop("training_roots", None)
+    dataset.pop("training_merged_root", None)
     dataset["single_task"] = dataset.pop("task")
     dataset["root"] = dataset_root
     dataset["push_to_hub"] = bool(dataset.get("push_to_hub", False))
@@ -114,7 +116,13 @@ def collection_config(config: dict, dataset_root: str) -> dict:
     }
 
 
-def training_config(config: dict, output_dir: str, profile: str = "training") -> dict:
+def training_config(
+    config: dict,
+    output_dir: str,
+    profile: str = "training",
+    *,
+    dataset_root: str | Path | None = None,
+) -> dict:
     dataset = config["dataset"]
     model = config["model"]
     settings = run_settings(config, profile)
@@ -126,7 +134,7 @@ def training_config(config: dict, output_dir: str, profile: str = "training") ->
     native_dataset = deep_merge(
         {
             "repo_id": dataset["repo_id"],
-            "root": absolute_path(dataset["training_root"]),
+            "root": absolute_path(dataset_root or dataset["training_root"]),
             "use_imagenet_stats": True,
             "return_uint8": True,
             "eval_split": 0.0,

@@ -42,6 +42,8 @@ class ProjectConfigTest(unittest.TestCase):
         collection_native = collection_config(config, "/tmp/test_dataset")
         self.assertEqual(collection_native["dataset"]["root"], "/tmp/test_dataset")
         self.assertEqual(collection_native["robot"]["type"], "so101_follower")
+        self.assertNotIn("training_roots", collection_native["dataset"])
+        self.assertNotIn("training_merged_root", collection_native["dataset"])
         self.assertTrue(collection_native["display_data"])
         self.assertEqual(collection_native["display_mode"], "rerun")
         self.assertNotIn("show_clamp_warnings", collection_native)
@@ -59,6 +61,13 @@ class ProjectConfigTest(unittest.TestCase):
         self.assertEqual(desktop_training["peft"]["r"], 64)
         self.assertEqual(desktop_training["dataset"]["eval_split"], 0.1)
         self.assertTrue(desktop_training["policy"]["freeze_vision_encoder"])
+
+        overridden = training_config(
+            config,
+            "/tmp/test_training",
+            dataset_root="/tmp/merged_dataset",
+        )
+        self.assertEqual(overridden["dataset"]["root"], "/tmp/merged_dataset")
 
         inference_native = inference_config(config)
         self.assertEqual(inference_native["inference"]["type"], "sync")

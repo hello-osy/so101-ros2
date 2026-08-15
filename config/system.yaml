@@ -65,6 +65,12 @@ dataset:
   format: lerobot_v3
   repo_id: local/so101_pick_place
   storage_root: data/collected_datasets
+  # 모든 과거 수집 run을 찾아 학습 전에 하나의 LeRobot v3 데이터셋으로 병합합니다.
+  # latest 심볼릭 링크 중복과 0-episode 데이터셋은 자동으로 제외됩니다.
+  training_roots:
+    - data/collected_datasets/*/dataset
+  training_merged_root: data/merged_datasets
+  # training_roots를 제거하면 아래 단일 데이터셋 경로를 사용합니다.
   training_root: data/collected_datasets/latest/dataset
   task: Pick up the blue bottle cap inside the yellow square and place it inside the green square.
   fps: 30

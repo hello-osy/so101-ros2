@@ -21,6 +21,11 @@ from project_utils import (  # noqa: E402
     update_latest,
 )
 from system_config import load_system, run_settings, training_config  # noqa: E402
+from dataset_merge import (  # noqa: E402
+    planned_training_root,
+    prepare_training_dataset,
+    usable_training_roots,
+)
 
 
 def main() -> int:
@@ -33,21 +38,25 @@ def main() -> int:
     config_path = Path(args.config).resolve()
     config = load_system(config_path)
     settings = run_settings(config, args.profile)
+    dataset_roots, skipped_roots = usable_training_roots(config)
+    planned_root = planned_training_root(config, dataset_roots)
     native = training_config(
-        config, absolute_path("data/training_outputs/CHECK_RUN/training"), args.profile
+        config,
+        absolute_path("data/training_outputs/CHECK_RUN/training"),
+        args.profile,
+        dataset_root=planned_root,
     )
     command = [command_path("lerobot-train"), "--config_path=RESOLVED_CONFIG"]
     if args.check:
+        print(f"[training] source datasets: {len(dataset_roots)}")
+        for root in dataset_roots:
+            print(f"  - {root}")
+        for root in skipped_roots:
+            print(f"  - skipped empty dataset: {root}")
         print_check("training", native, command)
         return 0
 
     reject_placeholders(native)
-    dataset_root = native["dataset"].get("root")
-    if dataset_root and not Path(dataset_root).exists():
-        raise FileNotFoundError(
-            f"학습 dataset이 없습니다: {dataset_root}\n"
-            "먼저 ./launchfiles/collect_data.bash config/system.yaml을 실행하세요."
-        )
     policy_path = native["policy"]["path"]
     if Path(policy_path).is_absolute() and not Path(policy_path, "config.json").exists():
         raise FileNotFoundError(
@@ -59,7 +68,15 @@ def main() -> int:
         settings.get("output_root", "data/training_outputs"),
         settings.get("run_name", "smolvla_lora"),
     )
-    native = training_config(config, str(run_dir / "training"), args.profile)
+    for root in skipped_roots:
+        print(f"[training] skipped empty dataset: {root}")
+    dataset_root = prepare_training_dataset(config, dataset_roots)
+    native = training_config(
+        config,
+        str(run_dir / "training"),
+        args.profile,
+        dataset_root=dataset_root,
+    )
     resolved = snapshot_configs(config_path, native, artifacts)
     code = run_logged(
         [command_path("lerobot-train"), f"--config_path={resolved}"],
