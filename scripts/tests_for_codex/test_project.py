@@ -42,6 +42,9 @@ class ProjectConfigTest(unittest.TestCase):
         collection_native = collection_config(config, "/tmp/test_dataset")
         self.assertEqual(collection_native["dataset"]["root"], "/tmp/test_dataset")
         self.assertEqual(collection_native["robot"]["type"], "so101_follower")
+        self.assertTrue(collection_native["display_data"])
+        self.assertEqual(collection_native["display_mode"], "rerun")
+        self.assertNotIn("show_clamp_warnings", collection_native)
         self.assertEqual(
             collection_native["dataset"]["single_task"],
             "Pick up the blue bottle cap inside the yellow square and place it inside the green square.",

@@ -1,0 +1,71 @@
+diff --git a/src/lerobot/robots/utils.py b/src/lerobot/robots/utils.py
+--- a/src/lerobot/robots/utils.py
++++ b/src/lerobot/robots/utils.py
+@@ -13,6 +13,7 @@
+ # limitations under the License.
+ 
+ import logging
++import os
+ from pprint import pformat
+ from typing import cast
+ 
+@@ -117,7 +118,7 @@ def ensure_safe_goal_position(
+                 "safe goal_pos": safe_goal_pos,
+             }
+ 
+-    if warnings_dict:
++    if warnings_dict and os.environ.get("SO101_SUPPRESS_CLAMP_WARNINGS") != "1":
+         logging.warning(
+             "Relative goal position magnitude had to be clamped to be safe.\n"
+             f"{pformat(warnings_dict, indent=4)}"
+diff --git a/src/lerobot/scripts/lerobot_record.py b/src/lerobot/scripts/lerobot_record.py
+--- a/src/lerobot/scripts/lerobot_record.py
++++ b/src/lerobot/scripts/lerobot_record.py
+@@ -470,7 +470,17 @@ def record(
+         with VideoEncodingManager(dataset):
+             recorded_episodes = 0
+             while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
+-                log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
++                logging.info("=" * 72)
++                logging.info(
++                    "[수집 상태] 완료 %d/%d | 현재 episode %d 녹화 중",
++                    dataset.num_episodes,
++                    cfg.dataset.num_episodes,
++                    dataset.num_episodes + 1,
++                )
++                logging.info("[키] →: 녹화 종료 | ←: 현재 episode 폐기/재촬영 | Esc: 전체 종료")
++                logging.info("[다음 단계] 녹화를 끝내려면 →, reset을 마쳤으면 다시 →")
++                logging.info("=" * 72)
++                log_say(f"Recording episode {dataset.num_episodes + 1}", cfg.play_sounds)
+                 record_loop(
+                     robot=robot,
+                     events=events,
+@@ -495,5 +505,9 @@ def record(
+                     log_say("Reset the environment", cfg.play_sounds)
+ 
++                    logging.info(
++                        "[수집 상태] episode %d 녹화 종료 | 환경을 reset한 뒤 →를 누르면 저장하고 다음으로 이동",
++                        dataset.num_episodes + 1,
++                    )
+                     record_loop(
+                         robot=robot,
+                         events=events,
+@@ -511,5 +525,9 @@ def record(
+                 if events["rerecord_episode"]:
+                     log_say("Re-record episode", cfg.play_sounds)
++                    logging.info(
++                        "[수집 상태] episode %d 폐기 | 같은 번호를 다시 녹화합니다",
++                        dataset.num_episodes + 1,
++                    )
+                     events["rerecord_episode"] = False
+                     events["exit_early"] = False
+                     dataset.clear_episode_buffer()
+@@ -516,5 +534,8 @@ def record(
+                     continue
+ 
+                 dataset.save_episode()
+                 recorded_episodes += 1
++                logging.info(
++                    "[수집 상태] 저장 완료 %d/%d", dataset.num_episodes, cfg.dataset.num_episodes
++                )
+     finally:

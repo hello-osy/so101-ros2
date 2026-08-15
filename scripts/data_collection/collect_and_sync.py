@@ -20,7 +20,13 @@ from system_config import load_system  # noqa: E402
 
 def sync(config: Path) -> int:
     return subprocess.run(
-        [command_path("python"), str(SCRIPTS / "sync_artifacts.py"), "push-dataset", str(config)],
+        [
+            command_path("python"),
+            str(SCRIPTS / "sync_artifacts.py"),
+            "push-dataset",
+            str(config),
+            "--quiet",
+        ],
         cwd=ROOT,
         check=False,
     ).returncode

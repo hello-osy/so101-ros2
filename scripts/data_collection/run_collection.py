@@ -53,12 +53,17 @@ def main() -> int:
     print("  오른쪽 화살표: 현재 episode 종료 / reset 종료 후 다음 episode 시작")
     print("  왼쪽 화살표 : 현재 episode 폐기 후 다시 기록")
     print("  Esc          : 전체 수집 종료 (저장 중에는 전원을 끄지 마세요)\n")
+    print(f"  목표 episode : {int(dataset.get('num_episodes', 1))}개")
+    print("  카메라       : Rerun 창에서 wrist/front 실시간 표시\n")
     input("팔과 작업물을 준비한 뒤 Enter를 누르세요: ")
 
+    env = project_environment()
+    if not bool(settings.get("show_clamp_warnings", False)):
+        env["SO101_SUPPRESS_CLAMP_WARNINGS"] = "1"
     code = run_logged(
         [command_path("lerobot-record"), f"--config_path={resolved}"],
         run_dir,
-        project_environment(),
+        env,
     )
     if code == 0 and (dataset_root / "meta" / "info.json").exists():
         update_latest(output_root, run_dir)

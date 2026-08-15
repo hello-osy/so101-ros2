@@ -104,6 +104,8 @@ def collection_config(config: dict, dataset_root: str) -> dict:
     dataset["push_to_hub"] = bool(dataset.get("push_to_hub", False))
     settings = run_settings(config, "collection")
     settings.pop("run_name", None)
+    # Project-only launcher behavior; not part of LeRobot's RecordConfig.
+    settings.pop("show_clamp_warnings", None)
     return {
         "robot": device(config, "follower", with_cameras=True),
         "teleop": device(config, "leader"),

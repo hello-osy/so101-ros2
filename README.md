@@ -176,9 +176,24 @@ leader를 손으로 움직이면 follower가 60Hz 제어 주기로 따라간다.
 키보드는 다음처럼 사용한다.
 
 - `Enter`: 첫 episode 시작
-- `→`: 현재 episode 종료, reset 후 다음 episode 시작
+- `→` 1회: 현재 episode 녹화 종료 후 reset 단계로 이동
+- 물체와 로봇을 시작 상태로 reset한 뒤 `→` 1회: 현재 episode 저장 후 다음 녹화 시작
 - `←`: 현재 episode 폐기 후 다시 수집
 - `Esc`: 전체 수집 종료 및 dataset 저장
+
+수집 중 Rerun 창에는 녹화 프로세스가 이미 읽은 wrist/front 영상이 실시간 표시된다. 카메라
+장치를 별도 프로그램이 중복해서 열지 않으므로 녹화 영상과 시각화 영상이 동일하다. 터미널에는
+아래 상태가 episode 단계마다 반복해서 표시된다.
+
+```text
+[수집 상태] 완료 3/50 | 현재 episode 4 녹화 중
+[키] →: 녹화 종료 | ←: 현재 episode 폐기/재촬영 | Esc: 전체 종료
+[다음 단계] 녹화를 끝내려면 →, reset을 마쳤으면 다시 →
+```
+
+`runs.collection.show_clamp_warnings: false`는 반복되는 관절 clamp 로그만 숨긴다. follower의
+`max_relative_target` 안전 제한과 실제 전송 action 저장은 그대로 적용된다. 경고를 다시
+확인하려면 이 값을 `true`로 바꾼다.
 
 결과는 `data/collected_datasets/<run>/dataset`에 저장되고, 가장 최근 성공 결과는
 `data/collected_datasets/latest/dataset`으로 연결된다. 데이터 형식은 LeRobotDataset v3이며
@@ -274,7 +289,16 @@ ip -br address && hostname -I
 ```
 
 같은 LAN의 유선 IPv4를 `config/system.yaml`의 `transfer.desktop.host`에, 데스크탑 계정과 repo
-절대 경로를 `user`, `repo_path`에 적는다. Orin에서 연결을 확인하고 SSH key를 등록한다.
+절대 경로를 `user`, `repo_path`에 적는다. `ssh-copy-id: No identities found`가 나오면 Orin에
+SSH key가 아직 없는 것이므로 먼저 생성한다. 질문에는 Enter를 눌러 기본 저장 위치를 쓰고,
+자동 dataset 전송이 필요하면 passphrase도 비워 둔다.
+
+```bash
+ssh-keygen -t ed25519 -a 100 -C "so101-orin-to-desktop"
+```
+
+공개키를 데스크탑에 한 번 등록한다. 아래 `osy`는 `transfer.desktop.user`와 같은 실제
+데스크탑 사용자명이어야 한다.
 
 ```bash
 ssh-copy-id -p 22 osy@<DESKTOP_IP>

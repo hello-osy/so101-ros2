@@ -74,13 +74,20 @@ import sys
 path = Path(sys.argv[1])
 text = path.read_text()
 replacements = {
-    '"torch>=2.7,<2.12.0"': '"torch>=2.7,<2.14.0"',
-    '"torchvision>=0.22.0,<0.27.0"': '"torchvision>=0.22.0,<0.29.0"',
+    '"torch>=2.7,<2.12.0"': '"torch>=2.7,<2.15.0"',
+    '"torchvision>=0.22.0,<0.27.0"': '"torchvision>=0.22.0,<0.30.0"',
 }
 for old, new in replacements.items():
     if old in text:
         text = text.replace(old, new, 1)
     elif new not in text:
+        previous = {
+            '"torch>=2.7,<2.12.0"': '"torch>=2.7,<2.14.0"',
+            '"torchvision>=0.22.0,<0.27.0"': '"torchvision>=0.22.0,<0.29.0"',
+        }[old]
+        if previous in text:
+            text = text.replace(previous, new, 1)
+            continue
         raise SystemExit(f"LeRobot dependency line was not recognized: {old}")
 path.write_text(text)
 print("LeRobot dependency ranges patched for Jetson CUDA 13.2.")

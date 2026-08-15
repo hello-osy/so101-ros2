@@ -36,38 +36,69 @@ def desktop(config: dict) -> tuple[str, int, PurePosixPath]:
     return f"{user}@{host}", int(value.get("ssh_port", 22)), PurePosixPath(repo)
 
 
-def rsync(source: str, destination: str, port: int, *, check: bool) -> int:
+def rsync(source: str, destination: str, port: int, *, check: bool, quiet: bool = False) -> int:
     command = [
         "rsync",
         "--archive",
         "--partial",
         "--mkpath",
         "--human-readable",
-        "--info=progress2",
         "--exclude=*.tmp",
         "-e",
         f"ssh -p {port}",
         source,
         destination,
     ]
-    print("$", " ".join(command))
+    if not quiet:
+        command.insert(6, "--info=progress2")
+        print("$", " ".join(command))
     if check:
         return 0
     try:
-        return subprocess.run(command, cwd=PROJECT_ROOT, check=False).returncode
+        return subprocess.run(
+            command,
+            cwd=PROJECT_ROOT,
+            check=False,
+            stdout=subprocess.DEVNULL if quiet else None,
+        ).returncode
     except FileNotFoundError as exc:
         raise SystemExit("rsync가 없습니다. `sudo apt install rsync openssh-client`를 실행하세요.") from exc
 
 
-def push_dataset(config: dict, check: bool) -> int:
+def push_dataset(config: dict, check: bool, quiet: bool = False) -> int:
     target, port, remote_repo = desktop(config)
     source = Path(absolute_path(config["dataset"]["storage_root"]))
     source.mkdir(parents=True, exist_ok=True)
     destination = f"{target}:{remote_repo / 'data/collected_datasets'}/"
-    return rsync(f"{source}/", destination, port, check=check)
+    return rsync(f"{source}/", destination, port, check=check, quiet=quiet)
 
 
-def pull_model(config: dict, check: bool) -> int:
+def rebase_model_paths(config: dict, checkpoint_dir: Path) -> None:
+    """Replace training-machine paths embedded in a PEFT checkpoint."""
+    base_path = absolute_path(config["model"]["base"]["path"])
+    vlm_path = absolute_path(config["model"]["vlm"]["path"])
+    replacements = {
+        "config.json": {
+            "pretrained_path": base_path,
+            "vlm_model_name": vlm_path,
+        },
+        "adapter_config.json": {
+            "base_model_name_or_path": base_path,
+        },
+    }
+    for filename, values in replacements.items():
+        path = checkpoint_dir / filename
+        if not path.is_file():
+            raise FileNotFoundError(f"checkpoint 파일이 없습니다: {path}")
+        document = json.loads(path.read_text(encoding="utf-8"))
+        document.update(values)
+        path.write_text(
+            json.dumps(document, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+
+def pull_model(config: dict, check: bool, quiet: bool = False) -> int:
     target, port, remote_repo = desktop(config)
     output_root = PurePosixPath(config["runs"]["training_desktop"]["output_root"])
     remote = remote_repo / output_root / "latest/training/checkpoints/last/pretrained_model"
@@ -85,6 +116,7 @@ def pull_model(config: dict, check: bool) -> int:
                 f"전송은 끝났지만 checkpoint config.json이 없습니다: {run_dir}. "
                 "데스크탑 학습이 정상 종료되었는지 확인하세요."
             )
+        rebase_model_paths(config, run_dir)
         latest = model_root / "latest"
         temporary = model_root / ".latest.tmp"
         temporary.unlink(missing_ok=True)
@@ -94,7 +126,7 @@ def pull_model(config: dict, check: bool) -> int:
     return code
 
 
-def push_ncu(config: dict, check: bool) -> int:
+def push_ncu(config: dict, check: bool, quiet: bool = False) -> int:
     target, port, remote_repo = desktop(config)
     output_root = Path(absolute_path(config["runs"]["benchmark"]["output_root"]))
     def successful_ncu(path: Path) -> bool:
@@ -130,6 +162,7 @@ def main() -> int:
     parser.add_argument("action", choices=("push-dataset", "pull-model", "push-ncu"))
     parser.add_argument("config", help="통합 system YAML")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--quiet", action="store_true", help="성공 진행률 숨김 (자동 동기화용)")
     args = parser.parse_args()
     config = load_system(args.config)
     functions = {
@@ -138,7 +171,7 @@ def main() -> int:
         "push-ncu": push_ncu,
     }
     try:
-        return functions[args.action](config, args.check)
+        return functions[args.action](config, args.check, args.quiet)
     except (ValueError, FileNotFoundError) as exc:
         parser.error(str(exc))
 
