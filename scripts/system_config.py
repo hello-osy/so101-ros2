@@ -101,6 +101,7 @@ def collection_config(config: dict, dataset_root: str) -> dict:
     dataset.pop("training_root", None)
     dataset.pop("training_roots", None)
     dataset.pop("training_merged_root", None)
+    dataset.pop("eval_holdout_root", None)
     dataset["single_task"] = dataset.pop("task")
     dataset["root"] = dataset_root
     dataset["push_to_hub"] = bool(dataset.get("push_to_hub", False))
@@ -122,6 +123,7 @@ def training_config(
     profile: str = "training",
     *,
     dataset_root: str | Path | None = None,
+    eval_split: float | None = None,
 ) -> dict:
     dataset = config["dataset"]
     model = config["model"]
@@ -141,6 +143,8 @@ def training_config(
         },
         dataset_overrides,
     )
+    if eval_split is not None:
+        native_dataset["eval_split"] = eval_split
     native_policy = deep_merge(
         {
             "path": local_path_or_hub_id(str(model["base"]["path"])),

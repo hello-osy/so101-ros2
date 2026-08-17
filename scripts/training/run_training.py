@@ -22,6 +22,8 @@ from project_utils import (  # noqa: E402
 )
 from system_config import load_system, run_settings, training_config  # noqa: E402
 from dataset_merge import (  # noqa: E402
+    configured_eval_holdout_root,
+    holdout_eval_split,
     planned_training_root,
     prepare_training_dataset,
     usable_training_roots,
@@ -39,12 +41,14 @@ def main() -> int:
     config = load_system(config_path)
     settings = run_settings(config, args.profile)
     dataset_roots, skipped_roots = usable_training_roots(config)
+    eval_split = holdout_eval_split(config, dataset_roots)
     planned_root = planned_training_root(config, dataset_roots)
     native = training_config(
         config,
         absolute_path("data/training_outputs/CHECK_RUN/training"),
         args.profile,
         dataset_root=planned_root,
+        eval_split=eval_split,
     )
     command = [command_path("lerobot-train"), "--config_path=RESOLVED_CONFIG"]
     if args.check:
@@ -53,6 +57,9 @@ def main() -> int:
             print(f"  - {root}")
         for root in skipped_roots:
             print(f"  - skipped empty dataset: {root}")
+        holdout = configured_eval_holdout_root(config, dataset_roots)
+        if holdout is not None:
+            print(f"[training] eval holdout dataset: {holdout} (eval_split={eval_split:.6f})")
         print_check("training", native, command)
         return 0
 
@@ -76,6 +83,7 @@ def main() -> int:
         str(run_dir / "training"),
         args.profile,
         dataset_root=dataset_root,
+        eval_split=eval_split,
     )
     resolved = snapshot_configs(config_path, native, artifacts)
     code = run_logged(

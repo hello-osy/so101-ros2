@@ -44,6 +44,7 @@ class ProjectConfigTest(unittest.TestCase):
         self.assertEqual(collection_native["robot"]["type"], "so101_follower")
         self.assertNotIn("training_roots", collection_native["dataset"])
         self.assertNotIn("training_merged_root", collection_native["dataset"])
+        self.assertNotIn("eval_holdout_root", collection_native["dataset"])
         self.assertTrue(collection_native["display_data"])
         self.assertEqual(collection_native["display_mode"], "rerun")
         self.assertNotIn("show_clamp_warnings", collection_native)
@@ -58,9 +59,19 @@ class ProjectConfigTest(unittest.TestCase):
 
         desktop_training = training_config(config, "/tmp/test_desktop_training", "training_desktop")
         self.assertEqual(desktop_training["batch_size"], 8)
-        self.assertEqual(desktop_training["peft"]["r"], 64)
-        self.assertEqual(desktop_training["dataset"]["eval_split"], 0.1)
+        self.assertEqual(desktop_training["peft"]["r"], 32)
+        self.assertEqual(desktop_training["policy"]["optimizer_lr"], 0.0001)
+        self.assertEqual(desktop_training["policy"]["scheduler_decay_lr"], 0.0000025)
+        self.assertEqual(desktop_training["dataset"]["eval_split"], 0.0)
         self.assertTrue(desktop_training["policy"]["freeze_vision_encoder"])
+
+        desktop_with_holdout = training_config(
+            config,
+            "/tmp/test_desktop_training",
+            "training_desktop",
+            eval_split=10 / 177,
+        )
+        self.assertEqual(desktop_with_holdout["dataset"]["eval_split"], 10 / 177)
 
         overridden = training_config(
             config,

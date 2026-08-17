@@ -68,7 +68,48 @@ def usable_training_roots(config: dict[str, Any]) -> tuple[list[Path], list[Path
             usable.append(root)
     if not usable:
         raise ValueError("학습 가능한 episode가 있는 데이터셋이 하나도 없습니다.")
+    holdout = configured_eval_holdout_root(config, usable)
+    if holdout is not None:
+        if holdout not in usable:
+            raise ValueError(
+                "dataset.eval_holdout_root는 비어 있지 않은 training_roots 중 하나여야 합니다: "
+                f"{holdout}"
+            )
+        # LeRobot holds out the final episodes. Keep one complete collection run
+        # at the end so no session is split across train and evaluation.
+        usable = [root for root in usable if root != holdout] + [holdout]
     return usable, skipped
+
+
+def configured_eval_holdout_root(config: dict[str, Any], roots: list[Path] | None = None) -> Path | None:
+    configured = config["dataset"].get("eval_holdout_root")
+    if configured is None:
+        return None
+    if not isinstance(configured, str) or not configured.strip():
+        raise ValueError("dataset.eval_holdout_root는 비어 있지 않은 경로여야 합니다.")
+    if configured == "auto_latest":
+        if not roots:
+            raise ValueError("auto_latest eval holdout을 선택할 유효한 dataset이 없습니다.")
+        # Collection run directory names begin with sortable timestamps.
+        return max(roots, key=lambda root: root.parent.name)
+    path = Path(configured).expanduser()
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+
+def holdout_eval_split(config: dict[str, Any], roots: list[Path]) -> float | None:
+    """Return the exact episode fraction for the configured whole-run holdout."""
+    holdout = configured_eval_holdout_root(config, roots)
+    if holdout is None:
+        return None
+    if not roots or roots[-1] != holdout:
+        raise ValueError("eval holdout dataset은 병합 순서의 마지막이어야 합니다.")
+    episode_counts = [
+        int(json.loads((root / "meta" / "info.json").read_text(encoding="utf-8"))["total_episodes"])
+        for root in roots
+    ]
+    return episode_counts[-1] / sum(episode_counts)
 
 
 def _fingerprint(roots: list[Path]) -> str:

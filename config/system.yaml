@@ -70,6 +70,10 @@ dataset:
   training_roots:
     - data/collected_datasets/*/dataset
   training_merged_root: data/merged_datasets
+  # 한 수집 세션 전체를 검증용으로 고정합니다. 병합할 때 이 세션을 마지막에 배치하고,
+  # episode 수로 정확한 eval_split을 계산하므로 같은 세션의 train/eval 누수를 막습니다.
+  # auto_latest는 현재 남아 있는 유효 수집 세션 중 가장 최근 세션을 선택합니다.
+  eval_holdout_root: auto_latest
   # training_roots를 제거하면 아래 단일 데이터셋 경로를 사용합니다.
   training_root: data/collected_datasets/latest/dataset
   task: Pick up the blue bottle cap inside the yellow square and place it inside the green square.
@@ -172,7 +176,6 @@ runs:
     max_eval_samples: 512
     use_policy_training_preset: true
     dataset:
-      eval_split: 0.1
       # 정밀 파지 좌표는 유지하면서 조명/카메라 화질 변화에만 강건하게 합니다.
       # affine/translate 같은 기하학 증강은 영상과 관절 action의 대응을 깨뜨리므로 사용하지 않습니다.
       image_transforms:
@@ -204,15 +207,15 @@ runs:
       freeze_vision_encoder: true
       train_expert_only: true
       train_state_proj: true
-      optimizer_lr: 0.001
+      optimizer_lr: 0.0001
       scheduler_warmup_steps: 1000
       scheduler_decay_steps: 20000
-      scheduler_decay_lr: 0.0001
+      scheduler_decay_lr: 0.0000025
       compile_model: false
     peft:
       method_type: LORA
-      r: 64
-      lora_alpha: 64
+      r: 32
+      lora_alpha: 32
     wandb:
       enable: false
       mode: offline

@@ -13,6 +13,7 @@ sys.path[:0] = [str(ROOT / "scripts"), str(ROOT / "scripts" / "training")]
 
 from dataset_merge import (  # noqa: E402
     discover_training_roots,
+    holdout_eval_split,
     planned_training_root,
     prepare_training_dataset,
     usable_training_roots,
@@ -58,6 +59,38 @@ class DatasetMergeConfigTest(unittest.TestCase):
             config = {"dataset": {"training_root": str(dataset)}}
             usable, _ = usable_training_roots(config)
             self.assertEqual(planned_training_root(config, usable), dataset.resolve())
+
+    def test_whole_run_holdout_is_merged_last_with_exact_split(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            holdout = self._dataset(root / "run-a", 2)
+            training = self._dataset(root / "run-b", 8)
+            config = {
+                "dataset": {
+                    "training_root": str(training),
+                    "training_roots": [str(holdout), str(training)],
+                    "eval_holdout_root": str(holdout),
+                }
+            }
+            usable, _ = usable_training_roots(config)
+            self.assertEqual(usable, [training.resolve(), holdout.resolve()])
+            self.assertAlmostEqual(holdout_eval_split(config, usable), 0.2)
+
+    def test_auto_latest_holdout_survives_collection_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            older = self._dataset(root / "20260817_170901_run", 5)
+            latest = self._dataset(root / "20260817_210543_run", 5)
+            config = {
+                "dataset": {
+                    "training_root": str(older),
+                    "training_roots": [str(latest), str(older)],
+                    "eval_holdout_root": "auto_latest",
+                }
+            }
+            usable, _ = usable_training_roots(config)
+            self.assertEqual(usable, [older.resolve(), latest.resolve()])
+            self.assertAlmostEqual(holdout_eval_split(config, usable), 0.5)
 
     def test_multiple_roots_are_merged_once_and_cached(self):
         with tempfile.TemporaryDirectory() as directory:
