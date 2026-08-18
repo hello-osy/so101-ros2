@@ -9,6 +9,7 @@ import json
 import os
 import statistics
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -61,12 +62,18 @@ def main() -> int:
     parser.add_argument("--cuda-profiler-api", action="store_true")
     parser.add_argument("--torch-profile-output")
     parser.add_argument("--torch-profile-table")
-    parser.add_argument("--torch-profile-iterations", type=int, default=5)
+    parser.add_argument("--torch-profile-cuda", action="store_true")
+    parser.add_argument("--torch-profile-record-shapes", action="store_true")
+    parser.add_argument("--torch-profile-memory", action="store_true")
+    parser.add_argument("--safe-gpu-profile-request")
+    parser.add_argument("--safe-gpu-profile-status")
+    parser.add_argument("--safe-gpu-profile-iterations", type=int, default=1)
     args = parser.parse_args()
 
     import torch
     from lerobot.rollout.inference.rtc import RTCInferenceEngine
     from lerobot.rollout.inference.sync import SyncInferenceEngine
+    from lerobot.rollout.robot_wrapper import ThreadSafeRobot
 
     metrics_path = Path(args.metrics_output)
     summary_path = Path(args.summary_output)
@@ -78,26 +85,103 @@ def main() -> int:
     profiler = None
     profiler_started = False
     profiler_finished = False
+    profiler_thread_id = None
     cuda_profiler_started = False
     cuda_profiler_finished = False
     finished = False
+    safe_request_path = (
+        Path(args.safe_gpu_profile_request) if args.safe_gpu_profile_request else None
+    )
+    safe_status_path = (
+        Path(args.safe_gpu_profile_status) if args.safe_gpu_profile_status else None
+    )
+    safe_profile_completed = False
 
-    def stop_profilers() -> None:
-        nonlocal profiler_finished, cuda_profiler_finished
+    def safe_profile_requested() -> bool:
+        return safe_request_path is not None and safe_request_path.exists()
+
+    def write_safe_status(status: str, error: str | None = None) -> None:
+        if safe_status_path is None:
+            return
+        value = {
+            "status": status,
+            "recorded_at": datetime.now().astimezone().isoformat(),
+            "live_inferences_before_capture": counter,
+            "capture_iterations": max(1, args.safe_gpu_profile_iterations),
+            "robot_actions_blocked": safe_profile_requested(),
+            "error": error,
+        }
+        safe_status_path.write_text(
+            json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+
+    write_safe_status("starting")
+
+    original_robot_send_action = ThreadSafeRobot.send_action
+
+    def gated_robot_send_action(self, action):
+        if safe_profile_requested():
+            return action
+        return original_robot_send_action(self, action)
+
+    ThreadSafeRobot.send_action = gated_robot_send_action
+
+    def start_cuda_profiler(device_value: object) -> None:
+        nonlocal cuda_profiler_started
+        device = torch.device(device_value or "cpu")
+        is_cuda = device.type == "cuda" and torch.cuda.is_available()
+        if args.cuda_profiler_api and is_cuda and not cuda_profiler_started:
+            torch.cuda.cudart().cudaProfilerStart()
+            cuda_profiler_started = True
+
+    def start_torch_profiler(device_value: object) -> None:
+        nonlocal profiler, profiler_started, profiler_thread_id
+        device = torch.device(device_value or "cpu")
+        is_cuda = device.type == "cuda" and torch.cuda.is_available()
+        if args.torch_profile_output and not profiler_started:
+            activities = [torch.profiler.ProfilerActivity.CPU]
+            if is_cuda and args.torch_profile_cuda:
+                activities.append(torch.profiler.ProfilerActivity.CUDA)
+            profiler = torch.profiler.profile(
+                activities=activities,
+                record_shapes=args.torch_profile_record_shapes,
+                profile_memory=args.torch_profile_memory,
+            )
+            profiler.__enter__()
+            profiler_started = True
+            profiler_thread_id = threading.get_ident()
+
+    def stop_torch_profiler() -> None:
+        nonlocal profiler_finished
         if profiler is not None and profiler_started and not profiler_finished:
+            if profiler_thread_id != threading.get_ident():
+                return
             profiler.__exit__(None, None, None)
             profiler_finished = True
             profiler.export_chrome_trace(args.torch_profile_output)
-            sort_by = "self_cuda_time_total" if torch.cuda.is_available() else "self_cpu_time_total"
+            sort_by = (
+                "self_cuda_time_total"
+                if args.torch_profile_cuda and torch.cuda.is_available()
+                else "self_cpu_time_total"
+            )
             table = profiler.key_averages().table(sort_by=sort_by, row_limit=100)
             if args.torch_profile_table:
                 Path(args.torch_profile_table).write_text(table + "\n", encoding="utf-8")
+
+    def stop_cuda_profiler() -> None:
+        nonlocal cuda_profiler_finished
         if args.cuda_profiler_api and cuda_profiler_started and not cuda_profiler_finished:
             torch.cuda.cudart().cudaProfilerStop()
             cuda_profiler_finished = True
 
-    def measured(operation: Callable[[], T], device_value: object, engine: str) -> T:
-        nonlocal counter, profiler, profiler_started, cuda_profiler_started
+    def stop_profilers() -> None:
+        stop_torch_profiler()
+        stop_cuda_profiler()
+
+    def measured(
+        operation: Callable[[], T], device_value: object, engine: str, phase: str = "live"
+    ) -> T:
+        nonlocal counter
         device = torch.device(device_value or "cpu")
         is_cuda = device.type == "cuda" and torch.cuda.is_available()
         in_range = (
@@ -107,19 +191,6 @@ def main() -> int:
                 or counter < args.warmup_inferences + args.profile_iterations
             )
         )
-        profile_index = counter - args.warmup_inferences
-        if in_range and args.cuda_profiler_api and not cuda_profiler_started:
-            torch.cuda.cudart().cudaProfilerStart()
-            cuda_profiler_started = True
-        if in_range and args.torch_profile_output and not profiler_started:
-            activities = [torch.profiler.ProfilerActivity.CPU]
-            if is_cuda:
-                activities.append(torch.profiler.ProfilerActivity.CUDA)
-            profiler = torch.profiler.profile(
-                activities=activities, record_shapes=True, profile_memory=True
-            )
-            profiler.__enter__()
-            profiler_started = True
         if is_cuda and args.cuda_synchronize:
             torch.cuda.synchronize(device)
             torch.cuda.reset_peak_memory_stats(device)
@@ -139,6 +210,7 @@ def main() -> int:
                 "index": counter,
                 "recorded_at": datetime.now().astimezone().isoformat(),
                 "engine": engine,
+                "phase": phase,
                 "latency_ms": elapsed_ms,
                 "warmup": warmup,
                 "profile_range": in_range,
@@ -157,35 +229,72 @@ def main() -> int:
             records.append(record)
             if not warmup and in_range:
                 samples.append(elapsed_ms)
-            if profiler is not None and profiler_started and not profiler_finished and in_range:
-                profiler.step()
             counter += 1
-            torch_limit = (
-                min(args.profile_iterations, max(1, args.torch_profile_iterations))
-                if args.profile_iterations > 0
-                else max(1, args.torch_profile_iterations)
-            )
-            if (args.torch_profile_output and profile_index + 1 >= torch_limit) or (
-                args.cuda_profiler_api and profile_index + 1 >= args.profile_iterations
+            if (
+                phase == "live"
+                and safe_request_path is not None
+                and not safe_profile_requested()
+                and not safe_profile_completed
             ):
-                stop_profilers()
+                write_safe_status("ready")
 
     original_sync_get_action = SyncInferenceEngine.get_action
+    original_sync_start = SyncInferenceEngine.start
+
+    def measured_sync_start(self):
+        original_sync_start(self)
+        start_cuda_profiler(self._device)
+        start_torch_profiler(self._device)
 
     def measured_sync_get_action(self, obs_frame):
         return measured(lambda: original_sync_get_action(self, obs_frame), self._device, "sync")
 
+    SyncInferenceEngine.start = measured_sync_start
     SyncInferenceEngine.get_action = measured_sync_get_action
 
     # RTC inference runs in its own thread. Wrapping get_action would only time
     # a queue pop, so wrap the actual policy chunk generation on each instance.
     original_rtc_init = RTCInferenceEngine.__init__
+    original_rtc_resume = RTCInferenceEngine.resume
+    original_rtc_loop = RTCInferenceEngine._rtc_loop
 
     def measured_rtc_init(self, *init_args, **init_kwargs):
+        nonlocal safe_profile_completed
         original_rtc_init(self, *init_args, **init_kwargs)
         original_predict = self._policy.predict_action_chunk
 
         def measured_predict(*predict_args, **predict_kwargs):
+            nonlocal safe_profile_completed
+            if safe_profile_requested() and not safe_profile_completed:
+                # This call already contains the latest processed live observation
+                # and RTC leftover prefix. Block actions before starting CUPTI.
+                self._policy_active.clear()
+                if self._action_queue is not None:
+                    self._action_queue.clear()
+                write_safe_status("capturing")
+                result = None
+                try:
+                    start_cuda_profiler(self._device)
+                    for _ in range(max(1, args.safe_gpu_profile_iterations)):
+                        result = measured(
+                            lambda: original_predict(*predict_args, **predict_kwargs),
+                            self._device,
+                            "rtc",
+                            phase="safe_gpu_profile",
+                        )
+                except BaseException as exc:
+                    write_safe_status("failed", repr(exc))
+                    raise
+                finally:
+                    try:
+                        stop_cuda_profiler()
+                    finally:
+                        self._shutdown_event.set()
+                        if self._global_shutdown_event is not None:
+                            self._global_shutdown_event.set()
+                safe_profile_completed = True
+                write_safe_status("complete")
+                return result
             return measured(
                 lambda: original_predict(*predict_args, **predict_kwargs), self._device, "rtc"
             )
@@ -193,6 +302,30 @@ def main() -> int:
         self._policy.predict_action_chunk = measured_predict
 
     RTCInferenceEngine.__init__ = measured_rtc_init
+
+    def measured_rtc_resume(self):
+        # resume() is called by the rollout control thread before RTC inference
+        # begins, keeping Kineto/CUPTI start and stop on the same main thread.
+        if safe_request_path is None:
+            start_cuda_profiler(self._device)
+        if args.torch_profile_cuda:
+            start_torch_profiler(self._device)
+        original_rtc_resume(self)
+
+    RTCInferenceEngine.resume = measured_rtc_resume
+
+    def measured_rtc_loop(self):
+        # CPU operator profiling is thread-local, so own its lifecycle in the
+        # RTC policy thread. CUDA activity mode remains an opt-in main-thread path.
+        if args.torch_profile_output and not args.torch_profile_cuda:
+            start_torch_profiler(self._device)
+        try:
+            original_rtc_loop(self)
+        finally:
+            if args.torch_profile_output and not args.torch_profile_cuda:
+                stop_torch_profiler()
+
+    RTCInferenceEngine._rtc_loop = measured_rtc_loop
 
     def finish() -> None:
         nonlocal finished

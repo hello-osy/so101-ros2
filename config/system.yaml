@@ -264,7 +264,6 @@ runs:
     output_root: data/inference_logs
     # 첫 실제 action부터 측정하므로 별도 warmup은 사용하지 않습니다.
     warmup_inferences: 0
-    iterations: 20
     cuda_synchronize: true
 
   profiling:
@@ -274,11 +273,21 @@ runs:
       enable: true
       interval_ms: 250
     torch:
-      active_iterations: 5
+      # Jetson nightly PyTorch/Kineto의 RTC cross-thread CUDA activity는
+      # CUDA illegal-address를 유발하므로 operator/Chrome trace는 CPU dispatch를 기록합니다.
+      # GPU timeline은 profile_nsys, kernel metric은 profile_ncu를 사용합니다.
+      cuda_activity: false
+      record_shapes: false
+      profile_memory: false
+    # Nsys/NCU는 실제 rollout 동안 대기하고, Ctrl-C 직후 action을 차단한
+    # 동일 프로세스/CUDA context에서 최신 RTC 입력을 상세 측정합니다.
+    safe_gpu:
+      iterations: 1
     nsys:
       trace: cuda,nvtx,osrt
       sample: none
     ncu:
       target_processes: all
       set: basic
+      # 한 번의 safe capture에서 앞쪽 kernel만 제한적으로 수집합니다.
       launch_count: 10

@@ -404,8 +404,36 @@ ssh -o ConnectTimeout=5 osy@192.168.50.1 'hostname && nvidia-smi'
 
 모든 측정은 실제 wrist/front 카메라 관측과 checkpoint를 사용하는 라이브 rollout에서 수행한다.
 따라서 **follower 로봇이 실제로 움직이며**, 작업 공간과 비상 정지 수단을 준비해야 한다. 별도
-warmup sample은 제외하지 않고 첫 실제 action부터 측정한다. 실행 중 Ctrl-C를 한 번 누르면 로봇과
-profiler를 안전하게 정리하고 현재 run 전체를 5070 Ti 데스크탑으로 전송한 뒤 종료한다.
+warmup sample은 제외하지 않고 첫 실제 action부터 latency·메모리·tegrastats를 측정한다.
+일반/Torch 측정은 Ctrl-C까지 계속된다. Nsys/NCU는 실제 rollout 동안 profiler를 대기시켜 GPU를
+warm 상태로 만든 뒤, Ctrl-C 한 번으로 action 전송 차단 → RTC queue 제거 → 동일 프로세스의 최신
+관측/RTC prefix 상세 capture → 종료/전송 순서로 동작한다.
+상세 capture가 끝나기를 기다릴 수 없으면 Ctrl-C를 한 번 더 누른다. 이때 `sudo`, Nsys/NCU,
+rollout Python이 속한 전체 process group을 종료하며, 5초 뒤에도 남아 있으면 자동으로 강제
+종료한다. 그 전에 Ctrl-C를 추가로 누르면 즉시 강제 종료한다.
+아직 첫 실제 inference가 완료되기 전에 Ctrl-C를 누르면 보존할 warm 상태가 없으므로 상세
+capture를 시작하지 않고 전체 profiler process group을 종료한다.
+
+최초 한 번 NVIDIA GPU performance counter를 일반 사용자에게 허용하고 재부팅한다. 권한이
+막힌 상태에서는 profiler가 로봇을 연결하기 전에 설정 방법을 출력하고 종료한다.
+
+```bash
+echo 'options nvidia NVreg_RestrictProfilingToAdminUsers=0' | \
+  sudo tee /etc/modprobe.d/so101-profiler.conf
+sudo update-initramfs -u
+sudo reboot
+```
+
+재부팅 후 값이 `0`인지 확인한다.
+
+```bash
+grep RmProfilingAdminOnly /proc/driver/nvidia/params
+```
+
+Jetson/Tegra의 CUDA trace는 이 값이 `0`이어도 현재 CUPTI에서 root 권한을 요구할 수 있다.
+성능 측정 launcher는 profiler가 포함된 rollout 자식만 `sudo`로 실행하므로 시작할 때 암호를 한 번
+입력한다. report 전송은 계속 원래 사용자 계정의 SSH 설정을 사용한다. launcher 전체를
+`sudo ./launchfiles/...`로 실행하지 않는다.
 
 일반 latency와 메모리를 측정한다.
 
@@ -419,17 +447,31 @@ PyTorch operator와 Chrome trace를 기록한다.
 ./launchfiles/profile_torch.bash config/system.yaml
 ```
 
+Jetson nightly PyTorch/Kineto에서 RTC 백그라운드 CUDA activity를 직접 수집하면 CUDA context가
+불안정해질 수 있어 기본 Torch trace는 CPU operator dispatch를 기록한다. CUDA timeline은 아래
+Nsight Systems 명령으로, kernel metric은 Nsight Compute 명령으로 기록한다. 실험적으로 Torch
+CUDA activity를 다시 켜려면 `runs.profiling.torch.cuda_activity: true`로 바꿀 수 있다.
+
 Nsight Systems report를 기록한다.
 
 ```bash
 ./launchfiles/profile_nsys.bash config/system.yaml
 ```
 
+실행 직후에는 CUDA capture가 꺼져 있어 실제 로봇 rollout의 timing을 교란하지 않는다. 충분히
+동작시킨 뒤 Ctrl-C를 누르면 새 action 전송을 즉시 차단하고 RTC queue를 비운다. 모델, CUDA
+context, allocator/cache, 최신 실제 observation과 RTC leftover는 유지한 채 기본 1회만 CUDA
+activity를 capture한다. capture 결과 action은 로봇에 보내지 않고 폐기한다.
+
 Nsight Compute kernel report를 기록한다.
 
 ```bash
 ./launchfiles/profile_ncu.bash config/system.yaml
 ```
+
+NCU도 같은 safe transition을 사용한다. 기본값은 한 번의 warmed inference에서 앞쪽 kernel 10개만
+수집한다. `runs.profiling.safe_gpu.iterations`와 `runs.profiling.ncu.launch_count`를 늘리면 report와
+정지 시간이 크게 증가하므로 물리 로봇에서는 기본값을 권장한다.
 
 가장 최근 profiling run 전체(`.ncu-rep`/`.nsys-rep`/Torch trace, 설정, console, 측정값)를 데스크탑 repo의
 `data/profiling_from_orin/<ORIN_HOSTNAME>/`으로 보낸다.
@@ -458,9 +500,8 @@ Nsight Compute kernel report를 기록한다.
 ./launchfiles/view_latest_profile.bash config/system.yaml torch
 ```
 
-측정 action 수, AMP, Torch profile 길이, Nsight 옵션은 모두 `config/system.yaml`의 `model.use_amp`,
-`runs.benchmark`, `runs.profiling`에서 바꾼다. `tegrastats`가 있으면 unified RAM, clock, 온도,
-전력도 동시에 저장된다.
+AMP와 Nsight 옵션은 `config/system.yaml`의 `model.use_amp`, `runs.profiling`에서 바꾼다.
+`tegrastats`가 있으면 unified RAM, clock, 온도, 전력도 Ctrl-C까지 동시에 저장된다.
 
 ## 7. Jetson 상태와 성능 모드
 

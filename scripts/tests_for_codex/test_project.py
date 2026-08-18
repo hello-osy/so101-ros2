@@ -21,6 +21,11 @@ from system_config import (  # noqa: E402
     training_config,
 )
 from benchmark_child import current_rss_bytes, memory_available_bytes  # noqa: E402
+from run_benchmark import (  # noqa: E402
+    elevate_profiler_on_jetson,
+    profiling_is_admin_only,
+    safe_gpu_profile_is_ready,
+)
 from camera_preview import camera_command  # noqa: E402
 
 
@@ -96,7 +101,12 @@ class ProjectConfigTest(unittest.TestCase):
         profile = benchmark_config(config)
         self.assertEqual(profile["inference"]["device"], "cuda")
         self.assertEqual(profile["benchmark"]["warmup_inferences"], 0)
+        self.assertNotIn("iterations", profile["benchmark"])
         self.assertTrue(profile["profiling"]["auto_push_on_exit"])
+        self.assertEqual(profile["profiling"]["safe_gpu"]["iterations"], 1)
+        self.assertEqual(profile["profiling"]["ncu"]["launch_count"], 10)
+        self.assertFalse(profile["profiling"]["torch"]["cuda_activity"])
+        self.assertIn("cuda", profile["profiling"]["nsys"]["trace"].split(","))
 
     def test_system_yaml_is_the_only_user_config(self):
         self.assertTrue((ROOT / "config/system.yaml").is_file())
@@ -125,6 +135,34 @@ class ProjectConfigTest(unittest.TestCase):
         self.assertGreater(current_rss_bytes(), 0)
         available = memory_available_bytes()
         self.assertTrue(available is None or available > 0)
+
+    def test_nvidia_profiling_permission_parser(self):
+        self.assertTrue(profiling_is_admin_only("RmProfilingAdminOnly: 1\n"))
+        self.assertFalse(profiling_is_admin_only("RmProfilingAdminOnly: 0\n"))
+
+    def test_jetson_profiler_elevation_keeps_original_command(self):
+        command = ["/usr/bin/python3", "child.py"]
+        elevated = elevate_profiler_on_jetson(command, "ncu")
+        if elevated != command:
+            self.assertEqual(elevated[-2:], command)
+            self.assertTrue(any(item.startswith("PYTHONPATH=") for item in elevated))
+        self.assertEqual(elevate_profiler_on_jetson(command, "none"), command)
+        self.assertEqual(elevate_profiler_on_jetson(command, "torch", False), command)
+
+    def test_safe_gpu_profile_requires_a_completed_live_inference(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            status = Path(temp_dir) / "status.json"
+            self.assertFalse(safe_gpu_profile_is_ready(status))
+            status.write_text(
+                '{"status": "starting", "live_inferences_before_capture": 0}\n',
+                encoding="utf-8",
+            )
+            self.assertFalse(safe_gpu_profile_is_ready(status))
+            status.write_text(
+                '{"status": "ready", "live_inferences_before_capture": 1}\n',
+                encoding="utf-8",
+            )
+            self.assertTrue(safe_gpu_profile_is_ready(status))
 
 
 if __name__ == "__main__":
