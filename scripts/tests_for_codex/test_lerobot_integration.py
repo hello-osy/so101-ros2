@@ -107,7 +107,15 @@ class LeRobotNativeConfigTest(unittest.TestCase):
                     self.assertIsNone(parsed.policy.input_features)
                     self.assertIsNone(parsed.policy.output_features)
                 else:
-                    self.assertEqual(parsed.inference.type, "sync")
+                    self.assertEqual(parsed.inference.type, "rtc")
+                    self.assertEqual(parsed.inference.queue_threshold, 30)
+                    self.assertEqual(parsed.inference.rtc.execution_horizon, 10)
+                    self.assertEqual(parsed.policy.num_steps, 5)
+                    self.assertEqual(parsed.fps, 30)
+                    self.assertEqual(parsed.interpolation_multiplier, 1)
+                    self.assertFalse(parsed.use_torch_compile)
+                    self.assertEqual(parsed.compile_warmup_inferences, 0)
+                    self.assertEqual(parsed.torch_compile_mode, "default")
                     self.assertEqual(parsed.robot.max_relative_target, 5.0)
 
 

@@ -402,7 +402,10 @@ ssh -o ConnectTimeout=5 osy@192.168.50.1 'hostname && nvidia-smi'
 
 ## 6. 성능 측정
 
-모든 측정은 기록된 dataset frame과 checkpoint를 사용하며 로봇에는 명령을 보내지 않는다.
+모든 측정은 실제 wrist/front 카메라 관측과 checkpoint를 사용하는 라이브 rollout에서 수행한다.
+따라서 **follower 로봇이 실제로 움직이며**, 작업 공간과 비상 정지 수단을 준비해야 한다. 별도
+warmup sample은 제외하지 않고 첫 실제 action부터 측정한다. 실행 중 Ctrl-C를 한 번 누르면 로봇과
+profiler를 안전하게 정리하고 현재 run 전체를 5070 Ti 데스크탑으로 전송한 뒤 종료한다.
 
 일반 latency와 메모리를 측정한다.
 
@@ -428,14 +431,34 @@ Nsight Compute kernel report를 기록한다.
 ./launchfiles/profile_ncu.bash config/system.yaml
 ```
 
-가장 최근의 성공한 NCU run 전체(`.ncu-rep`, 설정, console, 측정값)를 데스크탑 repo의
+가장 최근 profiling run 전체(`.ncu-rep`/`.nsys-rep`/Torch trace, 설정, console, 측정값)를 데스크탑 repo의
 `data/profiling_from_orin/<ORIN_HOSTNAME>/`으로 보낸다.
 
 ```bash
 ./launchfiles/push_ncu_results.bash config/system.yaml
 ```
 
-반복 횟수, AMP, Torch profile 길이, Nsight 옵션은 모두 `config/system.yaml`의 `model.use_amp`,
+모든 profiler 형식에 맞는 이름의 동일 명령도 제공한다.
+
+```bash
+./launchfiles/push_profile_results.bash config/system.yaml
+```
+
+데스크탑에서 가장 최근 report를 자동 판별하여 NCU UI, Nsight Systems UI 또는 Perfetto를 실행한다.
+
+```bash
+./launchfiles/view_latest_profile.bash config/system.yaml
+```
+
+형식을 직접 지정할 수도 있다.
+
+```bash
+./launchfiles/view_latest_profile.bash config/system.yaml ncu
+./launchfiles/view_latest_profile.bash config/system.yaml nsys
+./launchfiles/view_latest_profile.bash config/system.yaml torch
+```
+
+측정 action 수, AMP, Torch profile 길이, Nsight 옵션은 모두 `config/system.yaml`의 `model.use_amp`,
 `runs.benchmark`, `runs.profiling`에서 바꾼다. `tegrastats`가 있으면 unified RAM, clock, 온도,
 전력도 동시에 저장된다.
 

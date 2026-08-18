@@ -130,40 +130,63 @@ def pull_model(config: dict, check: bool, quiet: bool = False) -> int:
     return code
 
 
-def push_ncu(config: dict, check: bool, quiet: bool = False) -> int:
+def _profiling_destination(config: dict, source: Path) -> tuple[str, int, str]:
     target, port, remote_repo = desktop(config)
+    remote_root = PurePosixPath(config["transfer"].get("profiling_root", "data/profiling_from_orin"))
+    destination = f"{target}:{remote_repo / remote_root / socket.gethostname() / source.name}/"
+    return target, port, destination
+
+
+def push_profile_run(config: dict, source: Path, check: bool, quiet: bool = False) -> int:
+    source = source.resolve()
+    if not check and not source.is_dir():
+        raise FileNotFoundError(f"전송할 profiling run이 없습니다: {source}")
+    _target, port, destination = _profiling_destination(config, source)
+    return rsync(f"{source}/", destination, port, check=check, quiet=quiet)
+
+
+def push_profiling(config: dict, check: bool, quiet: bool = False) -> int:
     output_root = Path(absolute_path(config["runs"]["benchmark"]["output_root"]))
-    def successful_ncu(path: Path) -> bool:
+
+    def has_profile(path: Path) -> bool:
         metadata = path / "artifacts/run_metadata.json"
         try:
-            return json.loads(metadata.read_text(encoding="utf-8")).get("exit_code") == 0 and any(
+            run_metadata = json.loads(metadata.read_text(encoding="utf-8"))
+            return bool(run_metadata.get("live_robot_actions")) or any(
                 path.glob("*.ncu-rep")
+            ) or any(path.glob("*.nsys-rep")) or any(
+                (path / "artifacts").glob("torch_trace*.json")
             )
         except (OSError, ValueError):
             return False
 
     candidates = sorted(
-        (path for path in output_root.glob("*_ncu") if path.is_dir() and successful_ncu(path)),
+        (path for path in output_root.iterdir() if path.is_dir() and has_profile(path)),
         key=lambda path: path.stat().st_mtime,
         reverse=True,
-    )
+    ) if output_root.is_dir() else []
     if not candidates:
         if check:
-            source = output_root / "LATEST_NCU_RUN"
+            source = output_root / "LATEST_PROFILE_RUN"
         else:
             raise FileNotFoundError(
-                "전송할 NCU run이 없습니다. 먼저 ./launchfiles/profile_ncu.bash config/system.yaml을 실행하세요."
+                "전송할 profiling run이 없습니다. 먼저 성능 측정 명령을 실행하세요."
             )
     else:
         source = candidates[0]
-    remote_root = PurePosixPath(config["transfer"].get("profiling_root", "data/profiling_from_orin"))
-    destination = f"{target}:{remote_repo / remote_root / socket.gethostname() / source.name}/"
-    return rsync(f"{source}/", destination, port, check=check)
+    return push_profile_run(config, source, check, quiet)
+
+
+def push_ncu(config: dict, check: bool, quiet: bool = False) -> int:
+    """Backward-compatible alias; now sends the latest run of any profiler type."""
+    return push_profiling(config, check, quiet)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("push-dataset", "pull-model", "push-ncu"))
+    parser.add_argument(
+        "action", choices=("push-dataset", "pull-model", "push-ncu", "push-profiling")
+    )
     parser.add_argument("config", help="통합 system YAML")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--quiet", action="store_true", help="성공 진행률 숨김 (자동 동기화용)")
@@ -173,6 +196,7 @@ def main() -> int:
         "push-dataset": push_dataset,
         "pull-model": pull_model,
         "push-ncu": push_ncu,
+        "push-profiling": push_profiling,
     }
     try:
         return functions[args.action](config, args.check, args.quiet)

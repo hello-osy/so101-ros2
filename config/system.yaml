@@ -226,15 +226,31 @@ runs:
     output_root: data/inference_logs
     strategy:
       type: base
+    # 학습 데이터와 같은 30Hz로 50-step action chunk를 재생합니다.
+    fps: 30
+    # 추론 전용 override입니다. 학습값(10)은 바꾸지 않고 rollout의 flow-matching
+    # denoising만 5 step으로 줄여 chunk latency를 약 1초 이하로 낮춥니다.
+    policy:
+      num_steps: 5
     inference:
-      type: sync
+      type: rtc
+      queue_threshold: 30
+      rtc:
+        enabled: true
+        execution_horizon: 10
     # 0이면 시간 제한 없이 목표 달성 후 Ctrl+C를 누를 때까지 계속 실행합니다.
     duration: 0
-    interpolation_multiplier: 2
+    # 30Hz action을 그대로 전송합니다. 2는 60Hz 제어를 요구해 카메라/USB 병목을 만듭니다.
+    interpolation_multiplier: 1
+    # Orin Nano Super에서는 SmolVLA 전체 컴파일에 10분 이상 걸리고, 이후에도
+    # 새 shape 경로가 다시 컴파일되어 RTC action queue가 비게 됩니다.
+    # eager + 5 denoising steps가 시작 지연과 지속 latency 모두 더 안정적입니다.
     use_torch_compile: false
     torch_compile_backend: inductor
+    # reduce-overhead의 CUDA Graph는 SmolVLA image tensor 재사용과 충돌합니다.
+    # default 경로는 context.py에서 triton.cudagraphs=false로 컴파일됩니다.
     torch_compile_mode: default
-    compile_warmup_inferences: 2
+    compile_warmup_inferences: 0
     display_data: false
     play_sounds: false
     return_to_initial_position: true
@@ -243,14 +259,17 @@ runs:
       cuda_synchronize: true
 
   benchmark:
-    run_name: smolvla_lora_offline_profile
+    # 실제 wrist/front 카메라 관측으로 follower를 움직이며 측정합니다.
+    run_name: smolvla_lora_moving_profile
     output_root: data/inference_logs
-    sample_index: 0
-    warmup_inferences: 2
+    # 첫 실제 action부터 측정하므로 별도 warmup은 사용하지 않습니다.
+    warmup_inferences: 0
     iterations: 20
     cuda_synchronize: true
 
   profiling:
+    # 정상 종료 또는 Ctrl-C 한 번으로 종료하면 현재 run 전체를 5070 Ti로 보냅니다.
+    auto_push_on_exit: true
     tegrastats:
       enable: true
       interval_ms: 250

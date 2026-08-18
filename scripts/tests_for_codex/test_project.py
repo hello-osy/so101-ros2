@@ -81,12 +81,22 @@ class ProjectConfigTest(unittest.TestCase):
         self.assertEqual(overridden["dataset"]["root"], "/tmp/merged_dataset")
 
         inference_native = inference_config(config)
-        self.assertEqual(inference_native["inference"]["type"], "sync")
+        self.assertEqual(inference_native["inference"]["type"], "rtc")
+        self.assertEqual(inference_native["inference"]["queue_threshold"], 30)
+        self.assertEqual(inference_native["inference"]["rtc"]["execution_horizon"], 10)
+        self.assertEqual(inference_native["policy"]["num_steps"], 5)
+        self.assertEqual(inference_native["fps"], 30)
+        self.assertEqual(inference_native["interpolation_multiplier"], 1)
+        self.assertFalse(inference_native["use_torch_compile"])
+        self.assertEqual(inference_native["compile_warmup_inferences"], 0)
+        self.assertEqual(inference_native["torch_compile_mode"], "default")
         self.assertGreater(inference_native["robot"]["max_relative_target"], 0)
         self.assertEqual(inference_native["task"], collection_native["dataset"]["single_task"])
 
         profile = benchmark_config(config)
-        self.assertEqual(profile["benchmark"]["device"], "cuda")
+        self.assertEqual(profile["inference"]["device"], "cuda")
+        self.assertEqual(profile["benchmark"]["warmup_inferences"], 0)
+        self.assertTrue(profile["profiling"]["auto_push_on_exit"])
 
     def test_system_yaml_is_the_only_user_config(self):
         self.assertTrue((ROOT / "config/system.yaml").is_file())

@@ -176,13 +176,18 @@ def inference_config(config: dict) -> dict:
     settings = run_settings(config, "inference")
     for key in ("run_name", "output_root", "metrics"):
         settings.pop(key, None)
-    return {
-        "robot": device(config, "follower", with_cameras=True),
-        "policy": {
+    policy_overrides = settings.pop("policy", {})
+    native_policy = deep_merge(
+        {
             "path": local_path_or_hub_id(str(model["trained_policy_path"])),
             "device": model.get("device", "cuda"),
             "use_amp": bool(model.get("use_amp", True)),
         },
+        policy_overrides,
+    )
+    return {
+        "robot": device(config, "follower", with_cameras=True),
+        "policy": native_policy,
         "device": model.get("device", "cuda"),
         "task": dataset["task"],
         "fps": int(dataset.get("fps", 30)),
@@ -191,24 +196,10 @@ def inference_config(config: dict) -> dict:
 
 
 def benchmark_config(config: dict) -> dict:
-    dataset = config["dataset"]
-    model = config["model"]
     settings = run_settings(config, "benchmark")
-    for key in ("run_name", "output_root"):
-        settings.pop(key, None)
     return {
         "project": run_settings(config, "benchmark"),
-        "benchmark": {
-            "dataset": {
-                "repo_id": dataset["repo_id"],
-                "root": absolute_path(dataset["training_root"]),
-            },
-            "policy": {
-                "path": local_path_or_hub_id(str(model["trained_policy_path"])),
-                "use_amp": bool(model.get("use_amp", True)),
-            },
-            "device": model.get("device", "cuda"),
-            **settings,
-        },
+        "benchmark": settings,
+        "inference": inference_config(config),
         "profiling": run_settings(config, "profiling"),
     }
